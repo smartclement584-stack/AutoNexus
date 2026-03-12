@@ -1,0 +1,169 @@
+{
+  "project_name": "AutoNexus",
+  "design_philosophy": {
+    "identity": "E1 - The Anti-AI Designer",
+    "core_principles": [
+      "Fusion over Imitation: Industrial utility meets modern e-commerce.",
+      "Emotion First: Trust, Speed, and Durability.",
+      "Content is King: Parts specs and prices are the heroes.",
+      "Zoom In: High fidelity details for parts.",
+      "Negative Space: Clean lists, no clutter.",
+      "Contrast: High contrast for outdoor visibility."
+    ],
+    "anti_patterns": [
+      "No generic purple/teal gradients.",
+      "No 'Inter' for headings - use Barlow Condensed.",
+      "No center-aligned everything - use strong left alignment.",
+      "No gloss/glassmorphism that hinders readability."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Barlow Condensed, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight uppercase",
+      "h2": "text-3xl md:text-4xl font-bold tracking-tight",
+      "h3": "text-2xl font-semibold tracking-normal",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-muted-foreground",
+      "price": "font-mono text-lg md:text-xl font-bold tracking-tighter"
+    },
+    "imports": [
+      "import '@fontsource/barlow-condensed/700.css';",
+      "import '@fontsource/inter/400.css';",
+      "import '@fontsource/inter/600.css';",
+      "import '@fontsource/jetbrains-mono/700.css';"
+    ]
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "DEFAULT": "#1a5c38",
+        "foreground": "#ffffff",
+        "hover": "#144a2d",
+        "active": "#0f3922"
+      },
+      "secondary": {
+        "DEFAULT": "#f3f4f6",
+        "foreground": "#1f2937"
+      },
+      "accent": {
+        "DEFAULT": "#eab308",
+        "foreground": "#422006"
+      },
+      "background": "#ffffff",
+      "foreground": "#0f172a",
+      "muted": "#f1f5f9",
+      "muted_foreground": "#64748b",
+      "border": "#e2e8f0",
+      "input": "#e2e8f0",
+      "destructive": "#ef4444"
+    },
+    "usage": {
+      "brand_primary": "bg-[#1a5c38] text-white",
+      "brand_surface": "bg-white border border-gray-100",
+      "text_primary": "text-gray-900",
+      "text_secondary": "text-gray-500",
+      "price_tag": "text-[#1a5c38] font-mono",
+      "stock_badge_in": "bg-green-100 text-green-800",
+      "stock_badge_low": "bg-yellow-100 text-yellow-800",
+      "stock_badge_out": "bg-red-100 text-red-800"
+    }
+  },
+  "layout_strategy": {
+    "grid_system": {
+      "mobile": "grid-cols-1 gap-4 p-4",
+      "tablet": "grid-cols-2 gap-6 p-6",
+      "desktop": "grid-cols-12 gap-8 p-8"
+    },
+    "bento_grid": {
+      "hero_span": "col-span-full md:col-span-8",
+      "side_span": "col-span-full md:col-span-4",
+      "feature_card": "p-6 rounded-xl border bg-white shadow-sm hover:shadow-md transition-shadow"
+    },
+    "spacing": {
+      "container_padding": "px-4 md:px-8 lg:px-12",
+      "section_gap": "py-12 md:py-20",
+      "component_gap": "gap-4"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#1a5c38] hover:bg-[#144a2d] text-white font-bold py-3 px-6 rounded-lg transition-transform active:scale-95 shadow-md",
+      "secondary": "bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold py-3 px-6 rounded-lg",
+      "whatsapp": "bg-[#25D366] hover:bg-[#128C7E] text-white font-bold py-2 px-4 rounded-full flex items-center gap-2 shadow-lg"
+    },
+    "cards": {
+      "product": "group relative bg-white border border-gray-200 rounded-xl overflow-hidden hover:border-[#1a5c38] transition-colors duration-300",
+      "category": "flex flex-col items-center justify-center p-4 bg-gray-50 rounded-lg hover:bg-[#1a5c38]/10 transition-colors cursor-pointer border border-transparent hover:border-[#1a5c38]",
+      "seller": "flex items-center p-4 bg-white border rounded-lg gap-4 hover:shadow-md transition-shadow"
+    },
+    "inputs": {
+      "search": "h-12 md:h-14 rounded-full border-2 border-gray-200 focus:border-[#1a5c38] px-6 text-lg shadow-sm w-full transition-colors",
+      "select": "h-10 rounded-md border-gray-200 focus:border-[#1a5c38] bg-white",
+      "text": "h-10 rounded-md border-gray-200 focus:border-[#1a5c38] px-3 w-full"
+    },
+    "navigation": {
+      "bottom_bar": "fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around p-3 md:hidden z-50",
+      "top_bar": "sticky top-0 z-40 w-full bg-[#1a5c38] text-white py-3 shadow-md"
+    }
+  },
+  "visual_enhancers": {
+    "textures": {
+      "noise": "bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20",
+      "pattern": "bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]"
+    },
+    "shadows": {
+      "soft": "shadow-[0_2px_8px_rgba(0,0,0,0.05)]",
+      "float": "shadow-[0_8px_30px_rgb(0,0,0,0.12)]"
+    },
+    "borders": {
+      "active": "border-[#1a5c38] border-2",
+      "default": "border-gray-200"
+    }
+  },
+  "media": {
+    "images": {
+      "hero_bg": "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80",
+      "mechanic_working": "https://images.unsplash.com/photo-1644183230182-85bcf9b0ec5f?auto=format&fit=crop&q=80",
+      "parts_engine": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80",
+      "parts_battery": "https://images.unsplash.com/photo-1767990495521-95cceb571125?auto=format&fit=crop&q=80",
+      "parts_brake": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80",
+      "seller_shop": "https://images.unsplash.com/photo-1550505095-81378a674395?auto=format&fit=crop&q=80",
+      "logo_placeholder": "https://placehold.co/200x50/1a5c38/ffffff?text=AutoNexus"
+    },
+    "icons": {
+      "library": "lucide-react",
+      "style": "stroke-width: 1.5px; size: 24px"
+    }
+  },
+  "motion": {
+    "transitions": {
+      "default": "transition-all duration-200 ease-in-out",
+      "hover": "hover:-translate-y-1 hover:shadow-lg"
+    },
+    "animations": {
+      "fade_in": "animate-in fade-in duration-500",
+      "slide_up": "animate-in slide-in-from-bottom-4 duration-500"
+    }
+  },
+  "accessibility": {
+    "contrast_check": "Ensure #1a5c38 text is only on white/light grey backgrounds. Use white text on green backgrounds.",
+    "focus_states": "focus:ring-2 focus:ring-[#1a5c38] focus:ring-offset-2 outline-none",
+    "aria_labels": "All icon-only buttons must have aria-label."
+  },
+  "instructions_to_main_agent": [
+    "1. Setup Tailwind Colors: Update tailwind.config.js to include the custom 'primary' color #1a5c38.",
+    "2. Install Fonts: Use @fontsource or Google Fonts for Barlow Condensed and Inter.",
+    "3. Build Layouts: Create a layout wrapper that handles the sticky header and bottom nav (mobile).",
+    "4. Use Shadcn: Customize shadcn components to match the 'rounded-lg' and 'border-gray-200' style.",
+    "5. Mock Data: Create a realistic data file for parts (Toyota, Nissan, etc.) and sellers in Camp Yabassi.",
+    "6. Mobile First: Test all views at 375px width first.",
+    "7. WhatsApp: Ensure the WhatsApp link format is correct (wa.me/237...).",
+    "8. Test IDs: Add data-testid to all interactive elements."
+  ],
+  "universal_guidelines": "Follow the E1 persona: Functional, High Contrast, No Fluff. Use real text, no Lorem Ipsum. Be specific to Cameroon context (FCFA, Douala locations)."
+}
