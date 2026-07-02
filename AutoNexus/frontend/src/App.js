@@ -11,6 +11,7 @@ import RequestsPage from "./pages/RequestsPage";
 import CreateRequestPage from "./pages/CreateRequestPage";
 import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
+import AdminPage from "./pages/AdminPage";
 import "./App.css";
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
             <Route path="requests" element={<RequestsPage />} />
             <Route path="requests/new" element={<CreateRequestPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="admin" element={<AdminPage />} />
             <Route path="login" element={<LoginPage />} />
           </Route>
         </Routes>

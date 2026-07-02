@@ -336,6 +336,7 @@ const HomePage = () => {
         </div>
       </section>
 
+      
       {/* Features Section */}
       <section className="py-16 md:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4">
@@ -658,8 +659,10 @@ const HomePage = () => {
 
 // Part Card Component
 const PartCard = ({ part }) => {
-  const stockStatus = part.stock > 20 ? "in" : part.stock > 5 ? "low" : "out";
-  const stockLabel = part.stock > 20 ? "In Stock" : part.stock > 5 ? "Limited" : "Low Stock";
+  // FIX: align stock status thresholds/labels with ProductPage (0 = Out of Stock)
+  const stock = part.stock ?? 0;
+  const stockStatus = stock === 0 ? "out" : stock <= 5 ? "low" : stock <= 20 ? "limited" : "in";
+  const stockLabel = stock === 0 ? "Out of Stock" : stock <= 5 ? "Low Stock" : stock <= 20 ? "Limited Stock" : "In Stock";
 
   const whatsappMessage = encodeURIComponent(
     `Hello, I found this spare part on AutoNexus.\n\n` +
@@ -710,7 +713,8 @@ const PartCard = ({ part }) => {
             variant="secondary"
             className={`text-xs ${
               stockStatus === "in" ? "bg-green-100 text-green-800" :
-              stockStatus === "low" ? "bg-yellow-100 text-yellow-800" :
+              stockStatus === "limited" ? "bg-yellow-100 text-yellow-800" :
+              stockStatus === "low" ? "bg-orange-100 text-orange-800" :
               "bg-red-100 text-red-800"
             }`}
           >

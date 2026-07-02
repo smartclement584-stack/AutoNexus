@@ -12,7 +12,9 @@ import {
   Menu,
   X,
   Phone,
-  MapPin
+  MapPin,
+  Stethoscope,
+  Shield
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "../components/ui/button";
@@ -28,7 +30,7 @@ import {
 const LOGO_URL = "https://customer-assets.emergentagent.com/job_parts-marketplace-43/artifacts/h9glnhhs_WhatsApp%20Image%202026-03-12%20at%204.18.13%20PM.jpeg";
 
 const Layout = () => {
-  const { user, isAuthenticated, isSeller, logout } = useAuth();
+  const { user, isAuthenticated, isSeller, isAdmin, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -36,6 +38,7 @@ const Layout = () => {
   const navItems = [
     { path: "/", icon: Home, label: "Home" },
     { path: "/search", icon: Search, label: "Search" },
+    { path: "/diagnostic", icon: Stethoscope, label: "Diagnose" },
     { path: "/sellers", icon: Store, label: "Sellers" },
     { path: "/requests", icon: MessageSquare, label: "Requests" },
   ];
@@ -111,6 +114,12 @@ const Layout = () => {
                         Dashboard
                       </DropdownMenuItem>
                     )}
+                    {isAdmin && (
+                      <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="admin-menu-item">
+                        <Shield size={16} className="mr-2" />
+                        Admin Panel
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={handleLogout} data-testid="logout-menu-item">
                       <LogOut size={16} className="mr-2" />
                       Logout
@@ -169,6 +178,20 @@ const Layout = () => {
                 >
                   <LayoutDashboard size={20} />
                   <span className="font-medium">Dashboard</span>
+                </Link>
+              )}
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-3 rounded-lg ${
+                    isActive("/admin")
+                      ? "bg-[#1a5c38] text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  <Shield size={20} />
+                  <span className="font-medium">Admin Panel</span>
                 </Link>
               )}
             </nav>
@@ -241,7 +264,7 @@ const Layout = () => {
       {/* Bottom Navigation - Mobile Only */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 safe-area-inset-bottom">
         <div className="flex justify-around py-2">
-          {navItems.map((item) => (
+          {navItems.filter(item => item.path !== "/requests").map((item) => (
             <Link
               key={item.path}
               to={item.path}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { Phone, Loader2, ArrowRight, CheckCircle } from "lucide-react";
+import { Phone, Loader2, ArrowRight, CheckCircle, Info } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -16,13 +16,14 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { sendOtp, verifyOtp, isAuthenticated } = useAuth();
-  
-  const [step, setStep] = useState(1); // 1: phone, 2: otp
+
+  const [step, setStep] = useState(1);
   const [phone, setPhone] = useState("+237");
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
+  // FIX: store demo OTP returned from backend so user can actually log in
+  const [demoCode, setDemoCode] = useState(null);
 
-  // Redirect if already logged in
   if (isAuthenticated) {
     const from = location.state?.from?.pathname || "/";
     navigate(from, { replace: true });
@@ -31,7 +32,6 @@ const LoginPage = () => {
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
-    
     if (!phone || phone.length < 13) {
       toast.error("Please enter a valid Cameroon phone number (+237XXXXXXXXX)");
       return;
@@ -41,7 +41,14 @@ const LoginPage = () => {
     try {
       const result = await sendOtp(phone);
       setStep(2);
-      toast.success("OTP sent to your phone");
+      // FIX: show demo code to user if backend returns it (no Twilio configured)
+      // matches backend field name `demo_otp`
+      if (result.demo_otp) {
+        setDemoCode(result.demo_otp);
+        toast.info(`Demo mode — your code is: ${result.demo_otp}`, { duration: 30000 });
+      } else {
+        toast.success("OTP sent to your phone via SMS");
+      }
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to send OTP");
     } finally {
@@ -51,7 +58,6 @@ const LoginPage = () => {
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
-    
     if (!otp || otp.length !== 6) {
       toast.error("Please enter the 6-digit OTP");
       return;
@@ -61,6 +67,7 @@ const LoginPage = () => {
     try {
       await verifyOtp(phone, otp);
       toast.success("Login successful!");
+      // FIX: redirect back to where they were trying to go, not just home
       const from = location.state?.from?.pathname || "/";
       navigate(from, { replace: true });
     } catch (error) {
@@ -81,10 +88,7 @@ const LoginPage = () => {
                 <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
               </svg>
             </div>
-            <h1 
-              className="text-2xl md:text-3xl font-bold text-gray-900"
-              style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
-            >
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
               Welcome to AutoNexus
             </h1>
             <p className="text-gray-500 mt-2">
@@ -93,7 +97,6 @@ const LoginPage = () => {
           </div>
 
           {step === 1 ? (
-            /* Step 1: Phone Number */
             <form onSubmit={handleSendOtp} className="space-y-6">
               <div>
                 <Label htmlFor="phone">Phone Number</Label>
@@ -114,37 +117,45 @@ const LoginPage = () => {
                 </p>
               </div>
 
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="w-full h-12 bg-[#1a5c38] hover:bg-[#144a2d]"
                 disabled={loading}
                 data-testid="send-otp-btn"
               >
                 {loading ? (
-                  <>
-                    <Loader2 size={20} className="mr-2 animate-spin" />
-                    Sending...
-                  </>
+                  <><Loader2 size={20} className="mr-2 animate-spin" />Sending...</>
                 ) : (
-                  <>
-                    Continue
-                    <ArrowRight size={18} className="ml-2" />
-                  </>
+                  <>Continue <ArrowRight size={18} className="ml-2" /></>
                 )}
               </Button>
             </form>
           ) : (
-            /* Step 2: OTP Verification */
             <form onSubmit={handleVerifyOtp} className="space-y-6">
+              {/* FIX: Show demo code banner if in demo mode */}
+              {demoCode && (
+                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <Info size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">Demo Mode</p>
+                    <p className="text-sm text-amber-700">
+                      No SMS configured. Your code is:{" "}
+                      <span
+                        className="font-mono font-bold text-lg tracking-widest cursor-pointer hover:text-amber-900"
+                        onClick={() => setOtp(demoCode)}
+                      >
+                        {demoCode}
+                      </span>
+                      <span className="text-xs ml-1">(tap to fill)</span>
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <Label>Enter OTP</Label>
                 <div className="flex justify-center mt-3">
-                  <InputOTP 
-                    maxLength={6} 
-                    value={otp} 
-                    onChange={setOtp}
-                    data-testid="otp-input"
-                  >
+                  <InputOTP maxLength={6} value={otp} onChange={setOtp} data-testid="otp-input">
                     <InputOTPGroup>
                       <InputOTPSlot index={0} />
                       <InputOTPSlot index={1} />
@@ -160,31 +171,22 @@ const LoginPage = () => {
                 </p>
               </div>
 
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="w-full h-12 bg-[#1a5c38] hover:bg-[#144a2d]"
                 disabled={loading || otp.length !== 6}
                 data-testid="verify-otp-btn"
               >
                 {loading ? (
-                  <>
-                    <Loader2 size={20} className="mr-2 animate-spin" />
-                    Verifying...
-                  </>
+                  <><Loader2 size={20} className="mr-2 animate-spin" />Verifying...</>
                 ) : (
-                  <>
-                    <CheckCircle size={18} className="mr-2" />
-                    Verify & Login
-                  </>
+                  <><CheckCircle size={18} className="mr-2" />Verify & Login</>
                 )}
               </Button>
 
               <button
                 type="button"
-                onClick={() => {
-                  setStep(1);
-                  setOtp("");
-                }}
+                onClick={() => { setStep(1); setOtp(""); setDemoCode(null); }}
                 className="w-full text-center text-sm text-gray-500 hover:text-gray-700"
               >
                 Change phone number
@@ -193,7 +195,6 @@ const LoginPage = () => {
           )}
         </div>
 
-        {/* Info */}
         <p className="text-center text-xs text-gray-400 mt-6">
           By continuing, you agree to our Terms of Service
         </p>

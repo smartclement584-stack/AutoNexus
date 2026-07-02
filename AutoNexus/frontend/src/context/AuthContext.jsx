@@ -1,15 +1,12 @@
-import { API } from "./lib/constants";
-import { createContext, useContext, useState, useEffect } from "react";
+import { API } from "../lib/constants";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import axios from "axios";
-
 
 const AuthContext = createContext(null);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
 };
 
@@ -65,8 +62,26 @@ export const AuthProvider = ({ children }) => {
     return response.data;
   };
 
-  const getAuthHeader = () => {
+  // FIX: wrap in useCallback so reference is stable — prevents DashboardPage useEffect loop
+  const getAuthHeader = useCallback(() => {
     return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [token]);
+
+  const toggleFavorite = async (partId) => {
+    if (!token) return;
+    const favorites = user?.favorites || [];
+    const isFav = favorites.includes(partId);
+    try {
+      if (isFav) {
+        await axios.delete(`${API}/favorites/${partId}`, { headers: getAuthHeader() });
+        setUser(u => ({ ...u, favorites: u.favorites.filter(id => id !== partId) }));
+      } else {
+        await axios.post(`${API}/favorites/${partId}`, {}, { headers: getAuthHeader() });
+        setUser(u => ({ ...u, favorites: [...(u.favorites || []), partId] }));
+      }
+    } catch (e) {
+      console.error("Favorite toggle failed:", e);
+    }
   };
 
   const value = {
@@ -78,8 +93,11 @@ export const AuthProvider = ({ children }) => {
     logout,
     updateProfile,
     getAuthHeader,
+    toggleFavorite,
     isAuthenticated: !!user,
-    isSeller: user?.role === "seller"
+    isSeller: user?.role === "seller",
+    isAdmin: !!user?.is_admin,
+    favorites: user?.favorites || []
   };
 
   return (
