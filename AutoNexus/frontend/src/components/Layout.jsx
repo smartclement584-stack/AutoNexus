@@ -4,7 +4,6 @@ import {
   Home,
   Search,
   Store,
-  MessageSquare,
   LayoutDashboard,
   LogIn,
   LogOut,
@@ -13,7 +12,6 @@ import {
   X,
   Phone,
   MapPin,
-  Stethoscope,
   Shield
 } from "lucide-react";
 import { useState } from "react";
@@ -38,9 +36,8 @@ const Layout = () => {
   const navItems = [
     { path: "/", icon: Home, label: "Home" },
     { path: "/search", icon: Search, label: "Search" },
-    { path: "/diagnostic", icon: Stethoscope, label: "Diagnose" },
     { path: "/sellers", icon: Store, label: "Sellers" },
-    { path: "/requests", icon: MessageSquare, label: "Requests" },
+  
   ];
 
   const isActive = (path) => {

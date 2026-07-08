@@ -425,11 +425,17 @@ async def search_parts(
     query = {}
 
     if q:
-        query["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"part_number": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}}
-        ]
+        # IMPROVED: tokenize multi-word queries so word order / partial phrasing
+        # doesn't cause misses (e.g. "corolla brake" now matches a part named
+        # "Brake Pads Set" with brand "Toyota"/model "Corolla" even though that
+        # exact phrase never appears together in any single field).
+        words = [w for w in q.strip().split() if w]
+        searchable_fields = ["name", "part_number", "description", "category", "brands", "models"]
+        if words:
+            query["$and"] = [
+                {"$or": [{field: {"$regex": re.escape(word), "$options": "i"}} for field in searchable_fields]}
+                for word in words
+            ]
 
     if brand:
         query["brands"] = {"$in": [brand]}
@@ -456,19 +462,38 @@ async def search_parts(
     if price_filter:
         query["price"] = price_filter
 
-    # FIX: "rating" sort — sort by price_asc as fallback since parts don't store seller_rating
-    sort_options = {
-        "price_asc": [("price", 1)],
-        "price_desc": [("price", -1)],
-        "newest": [("created_at", -1)],
-        "rating": [("price", 1)],  # FIX: was sorting by non-existent seller_rating field
-    }
-    sort_by = sort_options.get(sort, [("price", 1)])
-
-    skip = (page - 1) * limit
-    cursor = db.parts.find(query, {"_id": 0}).sort(sort_by).skip(skip).limit(limit)
-    parts = await cursor.to_list(limit)
     total = await db.parts.count_documents(query)
+    skip = (page - 1) * limit
+
+    if sort == "rating":
+        # FIXED PROPERLY: parts don't store a rating themselves, but their seller
+        # does. Join to sellers and sort by the seller's actual rating instead of
+        # silently falling back to price, which was misleading users.
+        pipeline = [
+            {"$match": query},
+            {"$lookup": {
+                "from": "sellers",
+                "localField": "seller_id",
+                "foreignField": "id",
+                "as": "seller_info"
+            }},
+            {"$unwind": {"path": "$seller_info", "preserveNullAndEmptyArrays": True}},
+            {"$addFields": {"_seller_rating": {"$ifNull": ["$seller_info.rating", 0]}}},
+            {"$sort": {"_seller_rating": -1, "price": 1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$project": {"_id": 0, "seller_info": 0, "_seller_rating": 0}}
+        ]
+        parts = await db.parts.aggregate(pipeline).to_list(limit)
+    else:
+        sort_options = {
+            "price_asc": [("price", 1)],
+            "price_desc": [("price", -1)],
+            "newest": [("created_at", -1)],
+        }
+        sort_by = sort_options.get(sort, [("price", 1)])
+        cursor = db.parts.find(query, {"_id": 0}).sort(sort_by).skip(skip).limit(limit)
+        parts = await cursor.to_list(limit)
 
     seller_ids = list({p["seller_id"] for p in parts})
     sellers_map = {s["id"]: s async for s in db.sellers.find({"id": {"$in": seller_ids}}, {"_id": 0})}
@@ -1064,6 +1089,32 @@ async def root():
 @api_router.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# ============== LIGHTWEIGHT ANALYTICS ==============
+# Simple event logging so there is real usage data (searches, WhatsApp contact
+# clicks) instead of only anecdotal "early discussions show demand".
+# Not tied to any user/auth — just counts what people actually do.
+
+class AnalyticsEvent(BaseModel):
+    event_type: str  # "search" | "whatsapp_click" | "seller_view" | "part_view"
+    metadata: dict = {}
+
+@api_router.post("/analytics/event")
+async def log_event(event: AnalyticsEvent):
+    await db.analytics_events.insert_one({
+        "id": str(uuid.uuid4()),
+        "event_type": event.event_type,
+        "metadata": event.metadata,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    return {"status": "logged"}
+
+@api_router.get("/analytics/summary")
+async def analytics_summary(admin: dict = Depends(get_current_admin)):
+    """Admin-only rollup: counts per event type, useful for gauging real demand."""
+    pipeline = [{"$group": {"_id": "$event_type", "count": {"$sum": 1}}}]
+    results = await db.analytics_events.aggregate(pipeline).to_list(100)
+    return {r["_id"]: r["count"] for r in results}
 
 app.include_router(api_router)
 

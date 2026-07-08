@@ -12,6 +12,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger,
 } from "../components/ui/sheet";
 import ProductCard from "../components/ProductCard";
+import { logEvent } from "../lib/analytics";
 
 const SearchPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -108,6 +109,9 @@ const SearchPage = () => {
         setParts(res.data.parts);
         setTotalPages(res.data.pages);
         setTotal(res.data.total);
+        if (query) {
+          logEvent("search", { query, results_count: res.data.total });
+        }
       } catch (error) {
         console.error("Error searching parts:", error);
       } finally {

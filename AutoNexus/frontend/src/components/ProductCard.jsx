@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { MessageCircle, Phone, Star, CheckCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { logEvent } from "../lib/analytics";
 
 const ProductCard = ({ part }) => {
   const stockStatus = part.stock > 20 ? "in" : part.stock > 5 ? "low" : "out";
@@ -120,6 +121,7 @@ const ProductCard = ({ part }) => {
             rel="noopener noreferrer"
             className="flex-1"
             data-testid={`whatsapp-btn-${part.id}`}
+            onClick={() => logEvent("whatsapp_click", { part_id: part.id, seller_id: part.seller?.id })}
           >
             <Button 
               className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white"

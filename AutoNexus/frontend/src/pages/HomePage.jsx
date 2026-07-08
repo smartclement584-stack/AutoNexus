@@ -14,8 +14,6 @@ import {
   CheckCircle,
   Phone,
   MapPin,
-  ArrowRight,
-  Zap,
   Users,
   Package
 } from "lucide-react";
@@ -41,7 +39,6 @@ const PART_IMAGES = {
   battery: "https://images.unsplash.com/photo-1620714223084-8fcacc6dfd8d?auto=format&fit=crop&q=80&w=400",
   brakes: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&q=80&w=400",
   filter: "https://images.unsplash.com/photo-1635784063388-1ff609874cdf?auto=format&fit=crop&q=80&w=400",
-  mechanic: "https://images.unsplash.com/photo-1644183230182-85bcf9b0ec5f?auto=format&fit=crop&q=80&w=400",
   car: "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=800"
 };
 
@@ -490,73 +487,6 @@ const HomePage = () => {
                 </p>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Mechanic Request CTA */}
-      <section className="py-16 md:py-24 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="bg-white rounded-3xl shadow-xl overflow-hidden">
-            <div className="grid md:grid-cols-2">
-              {/* Image Side */}
-              <div className="relative h-64 md:h-auto">
-                <img 
-                  src={PART_IMAGES.mechanic}
-                  alt="Mechanic working"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-r from-[#1a5c38]/80 to-transparent" />
-                <div className="absolute bottom-6 left-6 text-white">
-                  <p className="text-sm font-medium mb-1">For Mechanics</p>
-                  <p className="text-2xl font-bold" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-                    Can't Find Your Part?
-                  </p>
-                </div>
-              </div>
-
-              {/* Content Side */}
-              <div className="p-8 md:p-12 flex flex-col justify-center">
-                <div className="inline-flex items-center gap-2 bg-amber-100 text-amber-800 rounded-full px-4 py-1 text-sm font-medium mb-4 w-fit">
-                  <Zap size={14} />
-                  Part Request Feature
-                </div>
-                <h3 
-                  className="text-2xl md:text-3xl font-bold text-gray-900 mb-4"
-                  style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
-                >
-                  Post a Part Request
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Describe the part you need and let sellers contact you directly with their offers. 
-                  Get multiple quotes and choose the best deal.
-                </p>
-                <ul className="space-y-3 mb-8">
-                  <li className="flex items-center gap-2 text-gray-700">
-                    <CheckCircle size={18} className="text-[#1a5c38]" />
-                    <span>Specify your vehicle details</span>
-                  </li>
-                  <li className="flex items-center gap-2 text-gray-700">
-                    <CheckCircle size={18} className="text-[#1a5c38]" />
-                    <span>Receive offers from multiple sellers</span>
-                  </li>
-                  <li className="flex items-center gap-2 text-gray-700">
-                    <CheckCircle size={18} className="text-[#1a5c38]" />
-                    <span>Compare prices and conditions</span>
-                  </li>
-                </ul>
-                <Link to="/requests/new">
-                  <Button 
-                    size="lg" 
-                    className="bg-[#1a5c38] hover:bg-[#144a2d]"
-                    data-testid="post-request-btn"
-                  >
-                    Post a Part Request
-                    <ArrowRight size={18} className="ml-2" />
-                  </Button>
-                </Link>
-              </div>
-            </div>
           </div>
         </div>
       </section>

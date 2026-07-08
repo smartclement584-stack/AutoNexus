@@ -12,6 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "../components/ui/table";
 import { useAuth } from "../context/AuthContext";
+import { logEvent } from "../lib/analytics";
 
 const ProductPage = () => {
   const { id } = useParams();
@@ -24,6 +25,7 @@ const ProductPage = () => {
       try {
         const res = await axios.get(`${API}/parts/${id}`);
         setPart(res.data);
+        logEvent("part_view", { part_id: id });
       } catch (error) {
         console.error("Error loading part:", error);
       } finally {
@@ -61,6 +63,12 @@ const ProductPage = () => {
   const stockInfo = getStockInfo(part.stock);
   const isFavorite = favorites.includes(part.id);
 
+  // Work out the lowest price across the current listing + all comparison
+  // rows, so we can highlight it with a "Best Price" badge instead of making
+  // buyers scan the whole table themselves.
+  const allPrices = [part.price, ...(part.price_comparison || []).map((c) => c.price)];
+  const lowestPrice = Math.min(...allPrices.filter((p) => typeof p === "number"));
+
   const whatsappMessage = encodeURIComponent(
     `Hello, I found this spare part on AutoNexus.\n\n` +
     `Product: ${part.name}\n` +
@@ -93,6 +101,7 @@ const ProductPage = () => {
               src={part.image || "https://placehold.co/600x600/e5e7eb/9ca3af?text=No+Image"}
               alt={part.name}
               className="w-full h-full object-cover"
+              loading="lazy"
               data-testid="product-image"
             />
           </div>
@@ -187,7 +196,14 @@ const ProductPage = () => {
           )}
 
           <div className="flex flex-col sm:flex-row gap-3">
-            <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className="flex-1" data-testid="whatsapp-contact-btn">
+            <a
+              href={whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1"
+              data-testid="whatsapp-contact-btn"
+              onClick={() => logEvent("whatsapp_click", { part_id: part.id, seller_id: part.seller?.id })}
+            >
               <Button className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white text-lg py-6" size="lg">
                 <MessageCircle size={22} className="mr-2" />Contact on WhatsApp
               </Button>
@@ -243,13 +259,23 @@ const ProductPage = () => {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <span className="font-mono font-bold text-[#1a5c38]">{part.price?.toLocaleString()} FCFA</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-[#1a5c38]">{part.price?.toLocaleString()} FCFA</span>
+                      {part.price === lowestPrice && (
+                        <Badge className="bg-yellow-400 text-gray-900 hover:bg-yellow-400">Best Price</Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge className={stockInfo.color}>{stockInfo.label}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={whatsappLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => logEvent("whatsapp_click", { part_id: part.id, seller_id: part.seller?.id })}
+                    >
                       <Button size="sm" className="bg-[#25D366] hover:bg-[#128C7E]">
                         <MessageCircle size={14} className="mr-1" />Contact
                       </Button>
@@ -282,13 +308,23 @@ const ProductPage = () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="font-mono font-bold">{comp.price?.toLocaleString()} FCFA</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold">{comp.price?.toLocaleString()} FCFA</span>
+                          {comp.price === lowestPrice && (
+                            <Badge className="bg-yellow-400 text-gray-900 hover:bg-yellow-400">Best Price</Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge className={compStockInfo.color}>{compStockInfo.label}</Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <a href={compLink} target="_blank" rel="noopener noreferrer">
+                        <a
+                          href={compLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => logEvent("whatsapp_click", { part_id: comp.id, seller_id: comp.seller?.id })}
+                        >
                           <Button size="sm" variant="outline">
                             <MessageCircle size={14} className="mr-1" />Contact
                           </Button>
