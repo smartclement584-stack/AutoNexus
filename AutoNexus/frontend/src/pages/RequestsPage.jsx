@@ -1,36 +1,52 @@
 import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { toast } from "sonner";
 import {
-  MessageSquare, Clock, MapPin, Loader2, Plus, Car, AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Phone
+  MessageSquare, Clock, MapPin, Loader2, Plus, Car, AlertCircle,
+  CheckCircle2, ChevronDown, ChevronUp, Phone, Star, BadgeCheck
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Textarea } from "../components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "../components/ui/dialog";
 import { useAuth } from "../context/AuthContext";
 
 const RequestsPage = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, getAuthHeader } = useAuth();
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
 
+  // Rating dialog state
+  const [rateOpen, setRateOpen] = useState(false);
+  const [rateTarget, setRateTarget] = useState(null); // { seller_id, seller_name }
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingHover, setRatingHover] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadRequests = async () => {
+    setLoading(true);
+    try {
+      const params = filter !== "all" ? `?status=${filter}` : "";
+      const res = await axios.get(`${API}/requests${params}`);
+      setRequests(res.data.requests);
+    } catch (error) {
+      console.error("Error loading requests:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadRequests = async () => {
-      setLoading(true);
-      try {
-        const params = filter !== "all" ? `?status=${filter}` : "";
-        const res = await axios.get(`${API}/requests${params}`);
-        setRequests(res.data.requests);
-      } catch (error) {
-        console.error("Error loading requests:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
     loadRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const formatDate = (dateString) => {
@@ -38,7 +54,6 @@ const RequestsPage = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  // FIX: pass redirect state so after login user comes back to /requests/new
   const handleNewRequest = () => {
     if (isAuthenticated) {
       navigate("/requests/new");
@@ -46,6 +61,53 @@ const RequestsPage = () => {
       navigate("/login", { state: { from: { pathname: "/requests/new" } } });
     }
   };
+
+  const handleAccept = async (request, resp) => {
+    try {
+      await axios.post(
+        `${API}/requests/${request.id}/accept?seller_id=${resp.seller_id}`,
+        {},
+        { headers: getAuthHeader() }
+      );
+      toast.success(`You accepted ${resp.seller_name}'s quote. You can now rate them.`);
+      loadRequests();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to accept quote");
+    }
+  };
+
+  const openRating = (request) => {
+    const seller = request.responses?.find(r => r.seller_id === request.accepted_seller_id);
+    setRateTarget({ seller_id: request.accepted_seller_id, seller_name: seller?.seller_name || "Seller" });
+    setRatingValue(0);
+    setRatingHover(0);
+    setRatingComment("");
+    setRateOpen(true);
+  };
+
+  const submitRating = async () => {
+    if (ratingValue < 1) {
+      toast.error("Please pick a star rating");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await axios.post(
+        `${API}/sellers/${rateTarget.seller_id}/rate`,
+        { rating: ratingValue, comment: ratingComment || undefined },
+        { headers: getAuthHeader() }
+      );
+      toast.success("Thanks for your rating!");
+      setRateOpen(false);
+      loadRequests();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to submit rating");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isOwner = (request) => user && request.user_id === user.id;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6" data-testid="requests-page">
@@ -63,7 +125,7 @@ const RequestsPage = () => {
       </div>
 
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {["all", "open", "responded"].map((status) => (
+        {["all", "open", "responded", "fulfilled"].map((status) => (
           <Button
             key={status}
             variant={filter === status ? "default" : "outline"}
@@ -105,10 +167,13 @@ const RequestsPage = () => {
                       <Badge className={
                         request.status === "open" ? "bg-green-100 text-green-700" :
                         request.status === "responded" ? "bg-blue-100 text-blue-700" :
+                        request.status === "fulfilled" ? "bg-[#1a5c38] text-white" :
                         "bg-gray-100 text-gray-700"
                       }>
                         {request.status === "responded" ? (
                           <><CheckCircle2 size={12} className="mr-1" />Responded ({request.responses?.length})</>
+                        ) : request.status === "fulfilled" ? (
+                          <><BadgeCheck size={12} className="mr-1" />Fulfilled</>
                         ) : request.status}
                       </Badge>
                     </div>
@@ -135,13 +200,15 @@ const RequestsPage = () => {
                     </div>
                   </div>
 
-                  {/* Contact requester if responded */}
-                  {request.user_phone && (
-                    <a href={`tel:${request.user_phone}`} className="flex-shrink-0">
-                      <Button variant="outline" size="sm">
-                        <Phone size={14} className="mr-1" />Call
-                      </Button>
-                    </a>
+                  {/* Owner rate button once fulfilled */}
+                  {isOwner(request) && request.status === "fulfilled" && !request.rated && (
+                    <Button size="sm" className="bg-[#1a5c38] hover:bg-[#144a2d] flex-shrink-0"
+                      onClick={() => openRating(request)}>
+                      <Star size={14} className="mr-1" />Rate Seller
+                    </Button>
+                  )}
+                  {isOwner(request) && request.rated && (
+                    <Badge className="bg-gray-100 text-gray-600 flex-shrink-0 h-fit">Rated</Badge>
                   )}
                 </div>
 
@@ -162,11 +229,15 @@ const RequestsPage = () => {
                           const waLink = `https://wa.me/${resp.seller_whatsapp?.replace('+', '')}?text=${encodeURIComponent(
                             `Hello ${resp.seller_name}, I saw your response to my request for ${request.part_name} on AutoNexus.`
                           )}`;
+                          const isAccepted = request.accepted_seller_id === resp.seller_id;
                           return (
-                            <div key={idx} className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                            <div key={idx} className={`rounded-lg p-4 border ${isAccepted ? "bg-green-50 border-[#1a5c38]" : "bg-gray-50 border-gray-100"}`}>
                               <div className="flex items-start justify-between gap-3">
                                 <div>
-                                  <p className="font-semibold text-gray-900 text-sm">{resp.seller_name}</p>
+                                  <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                                    {resp.seller_name}
+                                    {isAccepted && <Badge className="bg-[#1a5c38] text-white text-xs">Accepted</Badge>}
+                                  </p>
                                   <p className="text-[#1a5c38] font-bold mt-1">
                                     {resp.price?.toLocaleString()} FCFA
                                     <span className="text-gray-500 font-normal text-xs ml-2">({resp.condition})</span>
@@ -176,13 +247,20 @@ const RequestsPage = () => {
                                     <Badge className="bg-red-100 text-red-700 mt-1 text-xs">Not Available</Badge>
                                   )}
                                 </div>
-                                {resp.seller_whatsapp && (
-                                  <a href={waLink} target="_blank" rel="noopener noreferrer">
-                                    <Button size="sm" className="bg-[#25D366] hover:bg-[#128C7E] text-white flex-shrink-0">
-                                      <MessageSquare size={12} className="mr-1" />Chat
+                                <div className="flex flex-col gap-2 flex-shrink-0">
+                                  {resp.seller_whatsapp && (
+                                    <a href={waLink} target="_blank" rel="noopener noreferrer">
+                                      <Button size="sm" className="bg-[#25D366] hover:bg-[#128C7E] text-white w-full">
+                                        <MessageSquare size={12} className="mr-1" />Chat
+                                      </Button>
+                                    </a>
+                                  )}
+                                  {isOwner(request) && request.status !== "fulfilled" && (
+                                    <Button size="sm" variant="outline" onClick={() => handleAccept(request, resp)}>
+                                      <CheckCircle2 size={12} className="mr-1" />Accept
                                     </Button>
-                                  </a>
-                                )}
+                                  )}
+                                </div>
                               </div>
                             </div>
                           );
@@ -196,6 +274,45 @@ const RequestsPage = () => {
           ))}
         </div>
       )}
+
+      {/* Rating dialog */}
+      <Dialog open={rateOpen} onOpenChange={setRateOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Rate {rateTarget?.seller_name}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="flex justify-center gap-1">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setRatingValue(star)}
+                  onMouseEnter={() => setRatingHover(star)}
+                  onMouseLeave={() => setRatingHover(0)}
+                >
+                  <Star
+                    size={32}
+                    className={(ratingHover || ratingValue) >= star ? "text-yellow-400 fill-yellow-400" : "text-gray-300"}
+                  />
+                </button>
+              ))}
+            </div>
+            <Textarea
+              rows={3}
+              placeholder="Leave a comment (optional)"
+              value={ratingComment}
+              onChange={(e) => setRatingComment(e.target.value)}
+            />
+            <Button
+              className="w-full bg-[#1a5c38] hover:bg-[#144a2d]"
+              onClick={submitRating}
+              disabled={submitting}
+            >
+              {submitting ? <Loader2 size={16} className="mr-2 animate-spin" /> : null}
+              Submit Rating
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

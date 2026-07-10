@@ -87,7 +87,7 @@ const ProductCard = ({ part }) => {
               </Link>
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <Star size={12} className="fill-yellow-400 text-yellow-400" />
-                <span>{part.seller.rating?.toFixed(1)}</span>
+                <span>{part.seller.rating_count > 0 ? part.seller.rating?.toFixed(1) : "New"}</span>
                 <span>•</span>
                 <span>{part.seller.sales_count} sales</span>
               </div>

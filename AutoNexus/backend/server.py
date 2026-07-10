@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, UploadFile, File, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import jwt
-import random
 import re
+import bcrypt
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -57,23 +57,28 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 class UserBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    phone: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
     name: Optional[str] = None
     role: str = "buyer"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class User(UserBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    password_hash: str
     seller_id: Optional[str] = None
     favorites: List[str] = []  # list of part IDs
     is_admin: bool = False
 
-class OTPRequest(BaseModel):
-    phone: str
+class SignupRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    password: str
 
-class OTPVerify(BaseModel):
-    phone: str
-    code: str
+class LoginRequest(BaseModel):
+    identifier: str  # phone or email
+    password: str
 
 class Seller(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -83,10 +88,14 @@ class Seller(BaseModel):
     description: Optional[str] = None
     phone: str
     whatsapp: str
-    rating: float = 4.5
+    rating: float = 0.0
+    rating_count: int = 0
     sales_count: int = 0
-    verified: bool = True
+    verified: bool = False
     active: bool = True
+    status: str = "pending"  # pending | approved | rejected
+    id_document: Optional[str] = None  # national ID or business registration number (onboarding check)
+    last_active: Optional[str] = None
     image: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -111,7 +120,7 @@ class PartRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    user_phone: str
+    user_contact: str  # phone or email, whichever the user signed up with
     user_name: Optional[str] = None
     vehicle_brand: str
     vehicle_model: str
@@ -120,9 +129,27 @@ class PartRequest(BaseModel):
     description: Optional[str] = None
     urgency: str = "normal"
     location: str
-    status: str = "open"
+    status: str = "open"  # open | responded | fulfilled
     responses: List[dict] = []
+    accepted_seller_id: Optional[str] = None
+    accepted_price: Optional[int] = None
+    rated: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Rating(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    seller_id: str
+    user_id: str
+    user_name: Optional[str] = None
+    request_id: str
+    rating: int  # 1-5
+    comment: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class RatingCreate(BaseModel):
+    rating: int
+    comment: Optional[str] = None
 
 class SellerCreate(BaseModel):
     name: str
@@ -131,6 +158,7 @@ class SellerCreate(BaseModel):
     phone: str
     whatsapp: str
     image: Optional[str] = None
+    id_document: str  # National ID number or business registration number — required so admin can vet applicants
 
 class SellerUpdate(BaseModel):
     name: Optional[str] = None
@@ -149,7 +177,20 @@ class AdminSellerUpdate(BaseModel):
     image: Optional[str] = None
     verified: Optional[bool] = None
     active: Optional[bool] = None
-    rating: Optional[float] = None
+    status: Optional[str] = None
+    # NOTE: `rating` intentionally not editable here anymore — it's now computed
+    # automatically from real buyer ratings (see /sellers/{id}/rate). Manually
+    # overwriting it would immediately be overwritten again by the next rating.
+
+class AdminSellerCreate(BaseModel):
+    name: str
+    location: str
+    description: Optional[str] = None
+    phone: str
+    whatsapp: str
+    image: Optional[str] = None
+    id_document: Optional[str] = None
+    verified: bool = True
 
 class SparePartCreate(BaseModel):
     name: str
@@ -193,25 +234,128 @@ class UserUpdate(BaseModel):
 
 # ============== AUTH HELPERS ==============
 
-otp_store = {}
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def _purge_expired_otps():
-    now = datetime.now(timezone.utc)
-    expired = [phone for phone, data in otp_store.items() if now > data["expires"]]
-    for phone in expired:
-        del otp_store[phone]
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        return False
 
-def generate_otp():
-    return str(random.randint(100000, 999999))
-
-def create_token(user_id: str, phone: str, role: str):
+def create_token(user_id: str, role: str):
     payload = {
         "user_id": user_id,
-        "phone": phone,
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+# Common auto-part terms that mean the same thing across English, French, and
+# local pidgin usage. Searching for any one term also matches parts listed
+# under a synonym — buyers rarely know the "official" English part name.
+SEARCH_SYNONYM_GROUPS = [
+    ["brake", "brakes", "frein", "freins", "plaquette", "plaquettes"],
+    ["shock", "shocks", "shock absorber", "amortisseur", "amortisseurs"],
+    ["battery", "batterie", "batteries"],
+    ["headlight", "headlights", "headlamp", "phare", "phares"],
+    ["tire", "tyre", "tires", "tyres", "pneu", "pneus"],
+    ["engine", "moteur", "motor"],
+    ["alternator", "alternateur"],
+    ["radiator", "radiateur"],
+    ["clutch", "embrayage"],
+    ["filter", "filtre", "filters", "filtres"],
+    ["spark plug", "spark plugs", "bougie", "bougies"],
+    ["windshield", "windscreen", "pare-brise"],
+    ["bumper", "pare-choc", "pare-chocs"],
+    ["starter", "demarreur", "démarreur"],
+    ["gearbox", "transmission", "boite de vitesse", "boîte de vitesse"],
+    ["suspension", "suspensions"],
+    ["exhaust", "pot d'echappement", "pot d'échappement", "silencieux"],
+    ["belt", "belts", "courroie", "courroies"],
+    ["mirror", "mirrors", "retroviseur", "rétroviseur"],
+    ["wiper", "wipers", "essuie-glace"],
+]
+SEARCH_SYNONYM_LOOKUP = {}
+for group in SEARCH_SYNONYM_GROUPS:
+    for term in group:
+        SEARCH_SYNONYM_LOOKUP[term.lower()] = group
+
+def expand_search_word(word: str) -> list:
+    """Return the word plus any synonyms so search tolerates French/pidgin
+    part names and common phrasing differences."""
+    return SEARCH_SYNONYM_LOOKUP.get(word.lower(), [word])
+
+async def touch_seller_activity(seller_id: str):
+    if not seller_id:
+        return
+    await db.sellers.update_one(
+        {"id": seller_id},
+        {"$set": {"last_active": datetime.now(timezone.utc).isoformat()}}
+    )
+
+def public_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "phone": user.get("phone"),
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "role": user["role"],
+        "seller_id": user.get("seller_id"),
+        "is_admin": user.get("is_admin", False)
+    }
+
+def build_catalog_pdf(seller: dict, parts: list) -> bytes:
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, title=f"{seller['name']} - Catalog")
+    styles = getSampleStyleSheet()
+    elements = []
+
+    elements.append(Paragraph(seller["name"], styles["Title"]))
+    elements.append(Paragraph(f"{seller.get('location', '')}", styles["Normal"]))
+    contact_bits = []
+    if seller.get("phone"):
+        contact_bits.append(f"Phone: {seller['phone']}")
+    if seller.get("whatsapp"):
+        contact_bits.append(f"WhatsApp: {seller['whatsapp']}")
+    if contact_bits:
+        elements.append(Paragraph(" | ".join(contact_bits), styles["Normal"]))
+    elements.append(Spacer(1, 8 * mm))
+
+    table_data = [["Name", "Part #", "Category", "Price (FCFA)", "Stock", "Condition"]]
+    for p in parts:
+        table_data.append([
+            p.get("name", ""),
+            p.get("part_number", ""),
+            p.get("category", ""),
+            f"{p.get('price', 0):,}",
+            str(p.get("stock", 0)),
+            p.get("condition", ""),
+        ])
+
+    if len(table_data) == 1:
+        elements.append(Paragraph("No products listed yet.", styles["Normal"]))
+    else:
+        table = Table(table_data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a2f")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f2f2")]),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        elements.append(table)
+
+    doc.build(elements)
+    return buffer.getvalue()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
@@ -244,100 +388,63 @@ async def get_current_admin(user: dict = Depends(get_current_user)):
 
 # ============== AUTH ROUTES ==============
 
-@api_router.post("/auth/send-otp")
-async def send_otp(request: OTPRequest):
-    phone = request.phone
-    if not re.match(r'^\+237[0-9]{9}$', phone):
+@api_router.post("/auth/signup")
+async def signup(data: SignupRequest):
+    phone = data.phone.strip() if data.phone else None
+    email = data.email.strip().lower() if data.email else None
+
+    if not phone and not email:
+        raise HTTPException(status_code=400, detail="Provide a phone number or an email address")
+
+    if phone and not re.match(r'^\+237[0-9]{9}$', phone):
         raise HTTPException(status_code=400, detail="Invalid Cameroon phone number. Format: +237XXXXXXXXX")
 
-    otp = generate_otp()
-    _purge_expired_otps()
-    otp_store[phone] = {
-        "code": otp,
-        "expires": datetime.now(timezone.utc) + timedelta(minutes=10)
-    }
+    if email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
 
-    # Twilio SMS integration
-    twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
-    twilio_token = os.environ.get('TWILIO_AUTH_TOKEN')
-    twilio_from = os.environ.get('TWILIO_PHONE_NUMBER')
-    sms_sent = False
+    if len(data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
 
-    if twilio_sid and twilio_token and twilio_from:
-        try:
-            from twilio.rest import Client as TwilioClient
-            twilio_client = TwilioClient(twilio_sid, twilio_token)
-            twilio_client.messages.create(
-                body=f"Your AutoNexus verification code is: {otp}. Valid for 10 minutes.",
-                from_=twilio_from,
-                to=phone
-            )
-            sms_sent = True
-            logging.info(f"SMS sent to {phone}")
-        except Exception as e:
-            logging.error(f"Twilio SMS failed: {e}")
+    existing_query = {"$or": []}
+    if phone:
+        existing_query["$or"].append({"phone": phone})
+    if email:
+        existing_query["$or"].append({"email": email})
+    existing = await db.users.find_one(existing_query, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with this phone or email already exists")
 
-    logging.info(f"OTP for {phone}: {otp}")
+    new_user = User(
+        phone=phone,
+        email=email,
+        name=data.name,
+        password_hash=hash_password(data.password)
+    )
+    user_dict = new_user.model_dump()
+    user_dict['created_at'] = user_dict['created_at'].isoformat()
+    await db.users.insert_one(user_dict)
 
-    response = {"status": "sent", "message": "OTP sent successfully"}
-    # FIX: In demo mode (no Twilio), return the OTP so users can actually log in
-    if not sms_sent:
-        response["demo_otp"] = otp
-        response["demo_note"] = "Demo mode: no SMS sent. Use this code to login."
+    token = create_token(user_dict["id"], user_dict["role"])
+    return {"token": token, "user": public_user(user_dict)}
 
-    return response
+@api_router.post("/auth/login")
+async def login(data: LoginRequest):
+    identifier = data.identifier.strip()
+    is_email = "@" in identifier
+    query = {"email": identifier.lower()} if is_email else {"phone": identifier}
 
-@api_router.post("/auth/verify-otp")
-async def verify_otp(request: OTPVerify):
-    phone = request.phone
-    code = request.code
+    user = await db.users.find_one(query, {"_id": 0})
+    if not user or not verify_password(data.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    stored = otp_store.get(phone)
-    if not stored:
-        raise HTTPException(status_code=400, detail="No OTP found for this number")
-
-    if datetime.now(timezone.utc) > stored["expires"]:
-        del otp_store[phone]
-        raise HTTPException(status_code=400, detail="OTP expired")
-
-    if stored["code"] != code:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-
-    del otp_store[phone]
-
-    user = await db.users.find_one({"phone": phone}, {"_id": 0})
-    if not user:
-        new_user = User(phone=phone)
-        user_dict = new_user.model_dump()
-        user_dict['created_at'] = user_dict['created_at'].isoformat()
-        await db.users.insert_one(user_dict)
-        user = user_dict
-
-    token = create_token(user["id"], user["phone"], user["role"])
-
-    return {
-        "token": token,
-        "user": {
-            "id": user["id"],
-            "phone": user["phone"],
-            "name": user.get("name"),
-            "role": user["role"],
-            "seller_id": user.get("seller_id"),
-            "is_admin": user.get("is_admin", False)
-        }
-    }
+    token = create_token(user["id"], user["role"])
+    if user.get("seller_id"):
+        await touch_seller_activity(user["seller_id"])
+    return {"token": token, "user": public_user(user)}
 
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
-    return {
-        "id": user["id"],
-        "phone": user["phone"],
-        "name": user.get("name"),
-        "role": user["role"],
-        "seller_id": user.get("seller_id"),
-        "favorites": user.get("favorites", []),
-        "is_admin": user.get("is_admin", False)
-    }
+    return {**public_user(user), "favorites": user.get("favorites", [])}
 
 @api_router.put("/auth/me")
 async def update_me(data: UserUpdate, user: dict = Depends(get_current_user)):
@@ -425,15 +532,19 @@ async def search_parts(
     query = {}
 
     if q:
-        # IMPROVED: tokenize multi-word queries so word order / partial phrasing
-        # doesn't cause misses (e.g. "corolla brake" now matches a part named
-        # "Brake Pads Set" with brand "Toyota"/model "Corolla" even though that
-        # exact phrase never appears together in any single field).
+        # Tokenize multi-word queries so word order / partial phrasing doesn't
+        # cause misses, and expand each word with known synonyms (English /
+        # French / pidgin) so "frein" matches parts listed as "brake" and
+        # vice versa.
         words = [w for w in q.strip().split() if w]
         searchable_fields = ["name", "part_number", "description", "category", "brands", "models"]
         if words:
             query["$and"] = [
-                {"$or": [{field: {"$regex": re.escape(word), "$options": "i"}} for field in searchable_fields]}
+                {"$or": [
+                    {field: {"$regex": re.escape(variant), "$options": "i"}}
+                    for field in searchable_fields
+                    for variant in expand_search_word(word)
+                ]}
                 for word in words
             ]
 
@@ -505,6 +616,7 @@ async def search_parts(
                 "id": seller["id"],
                 "name": seller["name"],
                 "rating": seller["rating"],
+                "rating_count": seller.get("rating_count", 0),
                 "sales_count": seller["sales_count"],
                 "verified": seller["verified"],
                 "whatsapp": seller["whatsapp"],
@@ -585,7 +697,7 @@ async def list_requests(status: Optional[str] = None, page: int = 1, limit: int 
 async def create_request(data: PartRequestCreate, user: dict = Depends(get_current_user)):
     request_obj = PartRequest(
         user_id=user["id"],
-        user_phone=user["phone"],
+        user_contact=user.get("phone") or user.get("email") or "",
         user_name=user.get("name"),
         **data.model_dump()
     )
@@ -632,6 +744,7 @@ async def respond_to_request(request_id: str, response: RequestResponse, user: d
             "$set": {"status": "responded"}
         }
     )
+    await touch_seller_activity(seller["id"])
 
     # Send WhatsApp notification via Twilio (optional)
     twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
@@ -642,8 +755,8 @@ async def respond_to_request(request_id: str, response: RequestResponse, user: d
         try:
             from twilio.rest import Client as TwilioClient
             tc = TwilioClient(twilio_sid, twilio_token)
-            requester_phone = request.get("user_phone")
-            if requester_phone:
+            requester_phone = request.get("user_contact")
+            if requester_phone and requester_phone.startswith("+"):
                 tc.messages.create(
                     body=(
                         f"🔧 AutoNexus: A seller has responded to your request for *{request['part_name']}*!\n\n"
@@ -660,6 +773,91 @@ async def respond_to_request(request_id: str, response: RequestResponse, user: d
 
     return {"status": "success", "response": response_data}
 
+@api_router.post("/requests/{request_id}/accept")
+async def accept_request_quote(request_id: str, seller_id: str, user: dict = Depends(get_current_user)):
+    """Buyer accepts a seller's quote, closing the request and crediting the seller with a real sale."""
+    request = await db.requests.find_one({"id": request_id}, {"_id": 0})
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if request["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="This isn't your request")
+    if request["status"] == "fulfilled":
+        raise HTTPException(status_code=400, detail="This request has already been fulfilled")
+
+    matching = next((r for r in request.get("responses", []) if r["seller_id"] == seller_id), None)
+    if not matching:
+        raise HTTPException(status_code=404, detail="That seller hasn't responded to this request")
+
+    await db.requests.update_one(
+        {"id": request_id},
+        {"$set": {
+            "status": "fulfilled",
+            "accepted_seller_id": seller_id,
+            "accepted_price": matching["price"]
+        }}
+    )
+    await db.sellers.update_one({"id": seller_id}, {"$inc": {"sales_count": 1}})
+    await touch_seller_activity(seller_id)
+
+    return {"status": "fulfilled", "accepted_seller_id": seller_id, "accepted_price": matching["price"]}
+
+@api_router.post("/sellers/{seller_id}/rate")
+async def rate_seller(seller_id: str, data: RatingCreate, user: dict = Depends(get_current_user)):
+    """Buyers can only rate a seller once per completed (accepted) request — this is what keeps
+    ratings real instead of an admin-editable number."""
+    if data.rating < 1 or data.rating > 5:
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+
+    fulfilled_request = await db.requests.find_one({
+        "user_id": user["id"],
+        "accepted_seller_id": seller_id,
+        "status": "fulfilled",
+        "rated": {"$ne": True}
+    }, {"_id": 0})
+
+    if not fulfilled_request:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only rate a seller after accepting one of their quotes, and only once per deal"
+        )
+
+    rating_obj = Rating(
+        seller_id=seller_id,
+        user_id=user["id"],
+        user_name=user.get("name"),
+        request_id=fulfilled_request["id"],
+        rating=data.rating,
+        comment=data.comment
+    )
+    rating_dict = rating_obj.model_dump()
+    rating_dict['created_at'] = rating_dict['created_at'].isoformat()
+    await db.ratings.insert_one(rating_dict)
+
+    await db.requests.update_one({"id": fulfilled_request["id"]}, {"$set": {"rated": True}})
+
+    # Recompute the seller's live average rating from ALL their ratings — this
+    # is what replaces the old manually-edited number.
+    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+    prior_count = seller.get("rating_count", 0) if seller else 0
+    prior_rating = seller.get("rating", 0) if seller else 0
+    new_count = prior_count + 1
+    new_avg = ((prior_rating * prior_count) + data.rating) / new_count
+
+    await db.sellers.update_one(
+        {"id": seller_id},
+        {"$set": {"rating": round(new_avg, 2), "rating_count": new_count}}
+    )
+
+    return {k: v for k, v in rating_dict.items() if k != '_id'}
+
+@api_router.get("/sellers/{seller_id}/ratings")
+async def get_seller_ratings(seller_id: str, page: int = 1, limit: int = 20):
+    skip = (page - 1) * limit
+    ratings = await db.ratings.find({"seller_id": seller_id}, {"_id": 0}) \
+        .sort([("created_at", -1)]).skip(skip).limit(limit).to_list(limit)
+    total = await db.ratings.count_documents({"seller_id": seller_id})
+    return {"ratings": ratings, "total": total, "page": page, "pages": (total + limit - 1) // limit}
+
 # ============== SELLER DASHBOARD ROUTES ==============
 
 @api_router.post("/seller/register")
@@ -667,16 +865,35 @@ async def register_seller(data: SellerCreate, user: dict = Depends(get_current_u
     if user["role"] == "seller":
         raise HTTPException(status_code=400, detail="Already registered as seller")
 
-    seller = Seller(**data.model_dump())
+    existing_seller_id = user.get("seller_id")
+    if existing_seller_id:
+        existing = await db.sellers.find_one({"id": existing_seller_id}, {"_id": 0})
+        if existing and existing.get("status") == "pending":
+            raise HTTPException(status_code=400, detail="Your seller application is already pending admin approval")
+        if existing and existing.get("status") == "approved":
+            raise HTTPException(status_code=400, detail="Already registered as seller")
+        # status == "rejected" (or missing record) -> allow re-apply below
+
+    seller = Seller(**data.model_dump(), status="pending", verified=False)
     seller_dict = seller.model_dump()
     seller_dict['created_at'] = seller_dict['created_at'].isoformat()
     await db.sellers.insert_one(seller_dict)
 
+    # Role stays "buyer" until an admin approves the application
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"role": "seller", "seller_id": seller.id}}
+        {"$set": {"seller_id": seller.id}}
     )
     return {k: v for k, v in seller_dict.items() if k != '_id'}
+
+@api_router.get("/seller/application-status")
+async def seller_application_status(user: dict = Depends(get_current_user)):
+    if not user.get("seller_id"):
+        return {"status": "none"}
+    seller = await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
+    if not seller:
+        return {"status": "none"}
+    return {"status": seller.get("status", "approved"), "seller": seller}
 
 @api_router.get("/seller/profile")
 async def get_seller_profile(user: dict = Depends(get_current_user)):
@@ -696,6 +913,7 @@ async def update_seller_profile(data: SellerUpdate, user: dict = Depends(get_cur
         result = await db.sellers.update_one({"id": user["seller_id"]}, {"$set": update_data})
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Seller profile not found")
+    await touch_seller_activity(user["seller_id"])
     return await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
 
 @api_router.get("/seller/parts")
@@ -713,6 +931,7 @@ async def add_seller_part(data: SparePartCreate, user: dict = Depends(get_curren
     part_dict = part.model_dump()
     part_dict['created_at'] = part_dict['created_at'].isoformat()
     await db.parts.insert_one(part_dict)
+    await touch_seller_activity(user["seller_id"])
     return {k: v for k, v in part_dict.items() if k != '_id'}
 
 @api_router.put("/seller/parts/{part_id}")
@@ -725,6 +944,7 @@ async def update_seller_part(part_id: str, data: SparePartUpdate, user: dict = D
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if update_data:
         await db.parts.update_one({"id": part_id}, {"$set": update_data})
+    await touch_seller_activity(user["seller_id"])
     return await db.parts.find_one({"id": part_id}, {"_id": 0})
 
 @api_router.delete("/seller/parts/{part_id}")
@@ -734,6 +954,7 @@ async def delete_seller_part(part_id: str, user: dict = Depends(get_current_user
     result = await db.parts.delete_one({"id": part_id, "seller_id": user["seller_id"]})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Part not found")
+    await touch_seller_activity(user["seller_id"])
     return {"status": "deleted"}
 
 @api_router.get("/seller/requests")
@@ -743,10 +964,27 @@ async def get_seller_requests(user: dict = Depends(get_current_user)):
     requests = await db.requests.find({"status": "open"}, {"_id": 0}).sort([("created_at", -1)]).to_list(100)
     return {"requests": requests}
 
+@api_router.get("/seller/catalog/pdf")
+async def download_own_catalog(user: dict = Depends(get_current_user)):
+    if user["role"] != "seller" or not user.get("seller_id"):
+        raise HTTPException(status_code=403, detail="Not a seller")
+    seller = await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller profile not found")
+    parts = await db.parts.find({"seller_id": user["seller_id"]}, {"_id": 0}).to_list(2000)
+    pdf_bytes = build_catalog_pdf(seller, parts)
+    filename = f"{seller['name'].replace(' ', '_')}_catalog.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
 # ============== ADMIN ROUTES ==============
 # All routes below require the authenticated user to have is_admin=True.
-# To make a user an admin, manually set `is_admin: true` on their document
-# in the `users` collection in MongoDB (e.g. via mongosh or MongoDB Compass).
+# The very first admin must still be set manually in MongoDB (`is_admin: true`
+# on their user document) since no admin exists yet to grant it. After that,
+# any admin can promote/demote other users via GET/POST /admin/users below.
 
 @api_router.get("/admin/stats")
 async def admin_stats(admin: dict = Depends(get_current_admin)):
@@ -767,10 +1005,53 @@ async def admin_stats(admin: dict = Depends(get_current_admin)):
         "total_users": total_users,
     }
 
+@api_router.get("/admin/users")
+async def admin_list_users(
+    q: Optional[str] = None,
+    page: int = 1,
+    limit: int = 50,
+    admin: dict = Depends(get_current_admin)
+):
+    """List all users so an admin can grant/revoke admin rights from the UI
+    instead of needing direct database access."""
+    query = {}
+    if q:
+        query["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"phone": {"$regex": q, "$options": "i"}},
+            {"email": {"$regex": q, "$options": "i"}},
+        ]
+    skip = (page - 1) * limit
+    users = await db.users.find(query, {"_id": 0, "password_hash": 0}) \
+        .sort([("created_at", -1)]).skip(skip).limit(limit).to_list(limit)
+    total = await db.users.count_documents(query)
+    return {"users": users, "total": total, "page": page, "pages": (total + limit - 1) // limit}
+
+@api_router.post("/admin/users/{user_id}/toggle-admin")
+async def admin_toggle_admin(user_id: str, admin: dict = Depends(get_current_admin)):
+    """Grant or revoke admin rights for any user. Guards against locking
+    yourself out and against demoting the last remaining admin."""
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target.get("is_admin"):
+        if target["id"] == admin["id"]:
+            raise HTTPException(status_code=400, detail="You can't revoke your own admin access")
+        remaining_admins = await db.users.count_documents({"is_admin": True})
+        if remaining_admins <= 1:
+            raise HTTPException(status_code=400, detail="Can't remove the last remaining admin")
+        await db.users.update_one({"id": user_id}, {"$set": {"is_admin": False}})
+        return {"id": user_id, "is_admin": False}
+    else:
+        await db.users.update_one({"id": user_id}, {"$set": {"is_admin": True}})
+        return {"id": user_id, "is_admin": True}
+
 @api_router.get("/admin/sellers")
 async def admin_list_sellers(
     q: Optional[str] = None,
-    status: Optional[str] = None,  # "active" | "inactive" | None (all)
+    status: Optional[str] = None,  # "active" | "inactive" | None (all) — visibility status
+    approval: Optional[str] = None,  # "pending" | "approved" | "rejected" | None (all)
     page: int = 1,
     limit: int = 50,
     admin: dict = Depends(get_current_admin)
@@ -787,6 +1068,8 @@ async def admin_list_sellers(
         query["active"] = {"$ne": False}
     elif status == "inactive":
         query["active"] = False
+    if approval in ("pending", "approved", "rejected"):
+        query["status"] = approval
 
     skip = (page - 1) * limit
     sellers = await db.sellers.find(query, {"_id": 0}).sort([("created_at", -1)]).skip(skip).limit(limit).to_list(limit)
@@ -806,6 +1089,39 @@ async def admin_get_seller(seller_id: str, admin: dict = Depends(get_current_adm
     parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(1000)
     seller["parts"] = parts
     return seller
+
+@api_router.post("/admin/sellers")
+async def admin_create_seller(data: AdminSellerCreate, admin: dict = Depends(get_current_admin)):
+    """Admin creates a seller directly (no application/approval needed, no user account required)."""
+    seller = Seller(**data.model_dump(), status="approved")
+    seller_dict = seller.model_dump()
+    seller_dict['created_at'] = seller_dict['created_at'].isoformat()
+    await db.sellers.insert_one(seller_dict)
+    return {k: v for k, v in seller_dict.items() if k != '_id'}
+
+@api_router.post("/admin/sellers/{seller_id}/approve")
+async def admin_approve_seller(seller_id: str, admin: dict = Depends(get_current_admin)):
+    """Approve a pending seller application. Promotes the linked user's role to 'seller'."""
+    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+
+    await db.sellers.update_one({"id": seller_id}, {"$set": {"status": "approved"}})
+    await db.users.update_many(
+        {"seller_id": seller_id},
+        {"$set": {"role": "seller"}}
+    )
+    return await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+
+@api_router.post("/admin/sellers/{seller_id}/reject")
+async def admin_reject_seller(seller_id: str, admin: dict = Depends(get_current_admin)):
+    """Reject a pending seller application. The applicant keeps their buyer account and may re-apply."""
+    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+
+    await db.sellers.update_one({"id": seller_id}, {"$set": {"status": "rejected", "active": False}})
+    return await db.sellers.find_one({"id": seller_id}, {"_id": 0})
 
 @api_router.put("/admin/sellers/{seller_id}")
 async def admin_update_seller(seller_id: str, data: AdminSellerUpdate, admin: dict = Depends(get_current_admin)):
@@ -849,6 +1165,57 @@ async def admin_delete_seller(seller_id: str, admin: dict = Depends(get_current_
         {"$set": {"role": "buyer"}, "$unset": {"seller_id": ""}}
     )
     return {"status": "deleted", "seller_id": seller_id}
+
+@api_router.get("/admin/sellers/{seller_id}/parts")
+async def admin_get_seller_parts(seller_id: str, admin: dict = Depends(get_current_admin)):
+    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(2000)
+    return {"parts": parts}
+
+@api_router.post("/admin/sellers/{seller_id}/parts")
+async def admin_add_seller_part(seller_id: str, data: SparePartCreate, admin: dict = Depends(get_current_admin)):
+    """Admin adds a product on behalf of ANY seller, whether or not that seller has a linked user account."""
+    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    part = SparePart(seller_id=seller_id, **data.model_dump())
+    part_dict = part.model_dump()
+    part_dict['created_at'] = part_dict['created_at'].isoformat()
+    await db.parts.insert_one(part_dict)
+    return {k: v for k, v in part_dict.items() if k != '_id'}
+
+@api_router.put("/admin/sellers/{seller_id}/parts/{part_id}")
+async def admin_update_seller_part(seller_id: str, part_id: str, data: SparePartUpdate, admin: dict = Depends(get_current_admin)):
+    part = await db.parts.find_one({"id": part_id, "seller_id": seller_id}, {"_id": 0})
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update_data:
+        await db.parts.update_one({"id": part_id}, {"$set": update_data})
+    return await db.parts.find_one({"id": part_id}, {"_id": 0})
+
+@api_router.delete("/admin/sellers/{seller_id}/parts/{part_id}")
+async def admin_delete_seller_part(seller_id: str, part_id: str, admin: dict = Depends(get_current_admin)):
+    result = await db.parts.delete_one({"id": part_id, "seller_id": seller_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Part not found")
+    return {"status": "deleted"}
+
+@api_router.get("/admin/sellers/{seller_id}/catalog/pdf")
+async def admin_download_seller_catalog(seller_id: str, admin: dict = Depends(get_current_admin)):
+    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(2000)
+    pdf_bytes = build_catalog_pdf(seller, parts)
+    filename = f"{seller['name'].replace(' ', '_')}_catalog.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @api_router.get("/admin/parts")
 async def admin_list_parts(
@@ -895,19 +1262,6 @@ async def admin_list_requests(
     total = await db.requests.count_documents(query)
     return {"requests": requests, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
-@api_router.get("/admin/users")
-async def admin_list_users(q: Optional[str] = None, page: int = 1, limit: int = 50, admin: dict = Depends(get_current_admin)):
-    """List all registered users (buyers + sellers + admins)."""
-    query = {}
-    if q:
-        query["$or"] = [
-            {"phone": {"$regex": q, "$options": "i"}},
-            {"name": {"$regex": q, "$options": "i"}},
-        ]
-    skip = (page - 1) * limit
-    users = await db.users.find(query, {"_id": 0}).sort([("created_at", -1)]).skip(skip).limit(limit).to_list(limit)
-    total = await db.users.count_documents(query)
-    return {"users": users, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
 # ============== FILTER OPTIONS ==============
 
@@ -957,23 +1311,23 @@ async def seed_database():
     sellers_data = [
         {"id": "seller-1", "name": "Akan Motor Parts", "location": "Camp Yabassi, Douala",
          "description": "Specializing in Japanese and Korean vehicle parts since 2010. Quality assured parts with warranty.",
-         "phone": "+237677123456", "whatsapp": "+237677123456", "rating": 4.8, "sales_count": 1250, "verified": True,
+         "phone": "+237677123456", "whatsapp": "+237677123456", "rating": 4.8, "rating_count": 60, "sales_count": 1250, "verified": True, "status": "approved",
          "image": "https://images.unsplash.com/photo-1550505095-81378a674395?auto=format&fit=crop&q=80&w=400"},
         {"id": "seller-2", "name": "Camp Auto Parts", "location": "Camp Yabassi, Douala",
          "description": "Your one-stop shop for all car parts. New and quality used parts available.",
-         "phone": "+237699234567", "whatsapp": "+237699234567", "rating": 4.5, "sales_count": 890, "verified": True,
+         "phone": "+237699234567", "whatsapp": "+237699234567", "rating": 4.5, "rating_count": 45, "sales_count": 890, "verified": True, "status": "approved",
          "image": "https://images.unsplash.com/photo-1644183230182-85bcf9b0ec5f?auto=format&fit=crop&q=80&w=400"},
         {"id": "seller-3", "name": "Yabassi Spare Hub", "location": "Camp Yabassi, Douala",
          "description": "Wholesale and retail of automobile spare parts. Best prices guaranteed.",
-         "phone": "+237655345678", "whatsapp": "+237655345678", "rating": 4.2, "sales_count": 650, "verified": True,
+         "phone": "+237655345678", "whatsapp": "+237655345678", "rating": 4.2, "rating_count": 30, "sales_count": 650, "verified": True, "status": "approved",
          "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
         {"id": "seller-4", "name": "Tokyo Auto Spares", "location": "Camp Yabassi, Douala",
          "description": "Direct import of genuine Japanese car parts. Specializing in Toyota and Nissan.",
-         "phone": "+237688456789", "whatsapp": "+237688456789", "rating": 4.7, "sales_count": 1100, "verified": True,
+         "phone": "+237688456789", "whatsapp": "+237688456789", "rating": 4.7, "rating_count": 55, "sales_count": 1100, "verified": True, "status": "approved",
          "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
         {"id": "seller-5", "name": "Korea Motors Parts", "location": "Camp Yabassi, Douala",
          "description": "Specialists in Hyundai and Kia parts. Fast delivery within Douala.",
-         "phone": "+237666567890", "whatsapp": "+237666567890", "rating": 4.4, "sales_count": 780, "verified": True,
+         "phone": "+237666567890", "whatsapp": "+237666567890", "rating": 4.4, "rating_count": 38, "sales_count": 780, "verified": True, "status": "approved",
          "image": "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=400"},
     ]
 
@@ -1124,7 +1478,8 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def create_indexes():
     await db.users.create_index("id", unique=True)
-    await db.users.create_index("phone", unique=True)
+    await db.users.create_index("phone", unique=True, sparse=True)
+    await db.users.create_index("email", unique=True, sparse=True)
     await db.sellers.create_index("id", unique=True)
     await db.sellers.create_index([("name", 1)])
     await db.parts.create_index("id", unique=True)

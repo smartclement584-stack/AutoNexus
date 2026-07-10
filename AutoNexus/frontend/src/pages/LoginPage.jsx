@@ -1,28 +1,25 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { Phone, Loader2, ArrowRight, CheckCircle, Info } from "lucide-react";
+import { Phone, Mail, Lock, User, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "../components/ui/input-otp";
 import { useAuth } from "../context/AuthContext";
 
 const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sendOtp, verifyOtp, isAuthenticated } = useAuth();
+  const { signup, login, isAuthenticated } = useAuth();
 
-  const [step, setStep] = useState(1);
+  const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [contactType, setContactType] = useState("phone"); // "phone" | "email" — signup only
+  const [name, setName] = useState("");
+  const [identifier, setIdentifier] = useState(""); // login: phone or email
   const [phone, setPhone] = useState("+237");
-  const [otp, setOtp] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  // FIX: store demo OTP returned from backend so user can actually log in
-  const [demoCode, setDemoCode] = useState(null);
 
   if (isAuthenticated) {
     const from = location.state?.from?.pathname || "/";
@@ -30,48 +27,47 @@ const LoginPage = () => {
     return null;
   }
 
-  const handleSendOtp = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!phone || phone.length < 13) {
-      toast.error("Please enter a valid Cameroon phone number (+237XXXXXXXXX)");
+
+    if (!password || password.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return;
     }
 
     setLoading(true);
     try {
-      const result = await sendOtp(phone);
-      setStep(2);
-      // FIX: show demo code to user if backend returns it (no Twilio configured)
-      // matches backend field name `demo_otp`
-      if (result.demo_otp) {
-        setDemoCode(result.demo_otp);
-        toast.info(`Demo mode — your code is: ${result.demo_otp}`, { duration: 30000 });
+      if (mode === "signup") {
+        if (contactType === "phone" && phone.length < 13) {
+          toast.error("Please enter a valid Cameroon phone number (+237XXXXXXXXX)");
+          setLoading(false);
+          return;
+        }
+        if (contactType === "email" && !email.includes("@")) {
+          toast.error("Please enter a valid email address");
+          setLoading(false);
+          return;
+        }
+        await signup({
+          name: name || undefined,
+          phone: contactType === "phone" ? phone : undefined,
+          email: contactType === "email" ? email : undefined,
+          password,
+        });
+        toast.success("Account created! Welcome to AutoNexus.");
       } else {
-        toast.success("OTP sent to your phone via SMS");
+        if (!identifier) {
+          toast.error("Enter your phone number or email");
+          setLoading(false);
+          return;
+        }
+        await login(identifier, password);
+        toast.success("Login successful!");
       }
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to send OTP");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    if (!otp || otp.length !== 6) {
-      toast.error("Please enter the 6-digit OTP");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await verifyOtp(phone, otp);
-      toast.success("Login successful!");
-      // FIX: redirect back to where they were trying to go, not just home
       const from = location.state?.from?.pathname || "/";
       navigate(from, { replace: true });
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Invalid OTP");
+      toast.error(error.response?.data?.detail || "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -92,107 +88,157 @@ const LoginPage = () => {
               Welcome to AutoNexus
             </h1>
             <p className="text-gray-500 mt-2">
-              {step === 1 ? "Enter your phone number to continue" : "Enter the OTP sent to your phone"}
+              {mode === "login" ? "Log in to your account" : "Create your account"}
             </p>
           </div>
 
-          {step === 1 ? (
-            <form onSubmit={handleSendOtp} className="space-y-6">
-              <div>
-                <Label htmlFor="phone">Phone Number</Label>
-                <div className="relative mt-1">
-                  <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="+237XXXXXXXXX"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="pl-10 h-12"
-                    data-testid="phone-input"
-                  />
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter your Cameroon phone number starting with +237
-                </p>
-              </div>
+          {/* Mode toggle */}
+          <div className="flex bg-gray-100 rounded-lg p-1 mb-6">
+            <button
+              type="button"
+              onClick={() => setMode("login")}
+              className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                mode === "login" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+              }`}
+              data-testid="login-tab"
+            >
+              Log In
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("signup")}
+              className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                mode === "signup" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+              }`}
+              data-testid="signup-tab"
+            >
+              Sign Up
+            </button>
+          </div>
 
-              <Button
-                type="submit"
-                className="w-full h-12 bg-[#1a5c38] hover:bg-[#144a2d]"
-                disabled={loading}
-                data-testid="send-otp-btn"
-              >
-                {loading ? (
-                  <><Loader2 size={20} className="mr-2 animate-spin" />Sending...</>
-                ) : (
-                  <>Continue <ArrowRight size={18} className="ml-2" /></>
-                )}
-              </Button>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-6">
-              {/* FIX: Show demo code banner if in demo mode */}
-              {demoCode && (
-                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <Info size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-semibold text-amber-800">Demo Mode</p>
-                    <p className="text-sm text-amber-700">
-                      No SMS configured. Your code is:{" "}
-                      <span
-                        className="font-mono font-bold text-lg tracking-widest cursor-pointer hover:text-amber-900"
-                        onClick={() => setOtp(demoCode)}
-                      >
-                        {demoCode}
-                      </span>
-                      <span className="text-xs ml-1">(tap to fill)</span>
-                    </p>
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {mode === "signup" && (
+              <>
+                <div>
+                  <Label htmlFor="name">Name (optional)</Label>
+                  <div className="relative mt-1">
+                    <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      id="name"
+                      type="text"
+                      placeholder="Your name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="pl-10 h-12"
+                    />
                   </div>
                 </div>
-              )}
 
-              <div>
-                <Label>Enter OTP</Label>
-                <div className="flex justify-center mt-3">
-                  <InputOTP maxLength={6} value={otp} onChange={setOtp} data-testid="otp-input">
-                    <InputOTPGroup>
-                      <InputOTPSlot index={0} />
-                      <InputOTPSlot index={1} />
-                      <InputOTPSlot index={2} />
-                      <InputOTPSlot index={3} />
-                      <InputOTPSlot index={4} />
-                      <InputOTPSlot index={5} />
-                    </InputOTPGroup>
-                  </InputOTP>
+                {/* Phone vs Email choice */}
+                <div className="flex bg-gray-100 rounded-lg p-1">
+                  <button
+                    type="button"
+                    onClick={() => setContactType("phone")}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      contactType === "phone" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                    }`}
+                  >
+                    Use Phone
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setContactType("email")}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      contactType === "email" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                    }`}
+                  >
+                    Use Email
+                  </button>
                 </div>
-                <p className="text-center text-sm text-gray-500 mt-3">
-                  Code sent to {phone}
-                </p>
-              </div>
 
-              <Button
-                type="submit"
-                className="w-full h-12 bg-[#1a5c38] hover:bg-[#144a2d]"
-                disabled={loading || otp.length !== 6}
-                data-testid="verify-otp-btn"
-              >
-                {loading ? (
-                  <><Loader2 size={20} className="mr-2 animate-spin" />Verifying...</>
+                {contactType === "phone" ? (
+                  <div>
+                    <Label htmlFor="phone">Phone Number</Label>
+                    <div className="relative mt-1">
+                      <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <Input
+                        id="phone"
+                        type="tel"
+                        placeholder="+237XXXXXXXXX"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        className="pl-10 h-12"
+                        data-testid="phone-input"
+                      />
+                    </div>
+                  </div>
                 ) : (
-                  <><CheckCircle size={18} className="mr-2" />Verify & Login</>
+                  <div>
+                    <Label htmlFor="email">Email</Label>
+                    <div className="relative mt-1">
+                      <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="you@example.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="pl-10 h-12"
+                        data-testid="email-input"
+                      />
+                    </div>
+                  </div>
                 )}
-              </Button>
+              </>
+            )}
 
-              <button
-                type="button"
-                onClick={() => { setStep(1); setOtp(""); setDemoCode(null); }}
-                className="w-full text-center text-sm text-gray-500 hover:text-gray-700"
-              >
-                Change phone number
-              </button>
-            </form>
-          )}
+            {mode === "login" && (
+              <div>
+                <Label htmlFor="identifier">Phone or Email</Label>
+                <div className="relative mt-1">
+                  <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    id="identifier"
+                    type="text"
+                    placeholder="+237XXXXXXXXX or you@example.com"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    className="pl-10 h-12"
+                    data-testid="identifier-input"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="password">Password</Label>
+              <div className="relative mt-1">
+                <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="At least 6 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10 h-12"
+                  data-testid="password-input"
+                />
+              </div>
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full h-12 bg-[#1a5c38] hover:bg-[#144a2d]"
+              disabled={loading}
+              data-testid="submit-auth-btn"
+            >
+              {loading ? (
+                <><Loader2 size={20} className="mr-2 animate-spin" />Please wait...</>
+              ) : (
+                <>{mode === "login" ? "Log In" : "Create Account"} <ArrowRight size={18} className="ml-2" /></>
+              )}
+            </Button>
+          </form>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">

@@ -5,7 +5,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Plus, Package, MessageSquare, Edit, Trash2, Loader2, Store, X,
-  Upload, Image as ImageIcon, CheckCircle2, AlertCircle, Car, MapPin, Send
+  Upload, Image as ImageIcon, CheckCircle2, AlertCircle, Car, MapPin, Send, Download
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -41,6 +41,7 @@ const DashboardPage = () => {
   const [years, setYears] = useState([]);
   const [availableModels, setAvailableModels] = useState([]);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [applicationStatus, setApplicationStatus] = useState(null); // null | "none" | "pending" | "rejected" | "approved"
   const [editShopOpen, setEditShopOpen] = useState(false);
   const [editShopData, setEditShopData] = useState({
     name: "", location: "", description: "", phone: "", whatsapp: "", image: ""
@@ -58,7 +59,7 @@ const DashboardPage = () => {
   });
 
   const [registerData, setRegisterData] = useState({
-    name: "", location: "Camp Yabassi, Douala", description: "", phone: "", whatsapp: "", image: ""
+    name: "", location: "Camp Yabassi, Douala", description: "", phone: "", whatsapp: "", image: "", id_document: ""
   });
 
   const [partForm, setPartForm] = useState({
@@ -100,6 +101,9 @@ const DashboardPage = () => {
             whatsapp: profileRes.data.whatsapp || "",
             image: profileRes.data.image || ""
           });
+        } else {
+          const statusRes = await axios.get(`${API}/seller/application-status`, { headers: getAuthHeader() });
+          setApplicationStatus(statusRes.data.status);
         }
       } catch (error) {
         console.error("Error loading data:", error);
@@ -163,17 +167,37 @@ const DashboardPage = () => {
   // ---- Register seller ----
   const handleRegisterSeller = async (e) => {
     e.preventDefault();
-    if (!registerData.name || !registerData.phone || !registerData.whatsapp) {
+    if (!registerData.name || !registerData.phone || !registerData.whatsapp || !registerData.id_document) {
       toast.error("Please fill in all required fields");
       return;
     }
     try {
       await axios.post(`${API}/seller/register`, registerData, { headers: getAuthHeader() });
-      toast.success("Registered as seller successfully!");
+      toast.success("Application submitted! We'll notify you once an admin reviews it.");
       setRegisterOpen(false);
-      window.location.reload();
+      setApplicationStatus("pending");
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to register");
+      toast.error(error.response?.data?.detail || "Failed to submit application");
+    }
+  };
+
+  // ---- Download own catalog as PDF ----
+  const handleDownloadCatalog = async () => {
+    try {
+      const res = await axios.get(`${API}/seller/catalog/pdf`, {
+        headers: getAuthHeader(),
+        responseType: "blob"
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "catalog.pdf");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error("Failed to download catalog");
     }
   };
 
@@ -284,6 +308,23 @@ const DashboardPage = () => {
 
   // ---- Not a seller ----
   if (!isSeller) {
+    if (applicationStatus === "pending") {
+      return (
+        <div className="max-w-2xl mx-auto px-4 py-12" data-testid="dashboard-page">
+          <div className="text-center bg-white rounded-2xl border border-gray-200 p-8">
+            <AlertCircle size={64} className="mx-auto text-amber-400 mb-6" />
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-4" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
+              Application Under Review
+            </h1>
+            <p className="text-gray-500">
+              Your seller application has been submitted and is waiting for admin approval.
+              We'll let you know as soon as it's reviewed.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="max-w-2xl mx-auto px-4 py-12" data-testid="dashboard-page">
         <div className="text-center bg-white rounded-2xl border border-gray-200 p-8">
@@ -294,6 +335,14 @@ const DashboardPage = () => {
           <p className="text-gray-500 mb-6">
             Register your shop and start selling spare parts to mechanics and car owners in Camp Yabassi
           </p>
+          {applicationStatus === "rejected" && (
+            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-3 mb-6 text-left">
+              <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">
+                Your previous application wasn't approved. You're welcome to submit a new one below.
+              </p>
+            </div>
+          )}
           <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
             <DialogTrigger asChild>
               <Button className="bg-[#1a5c38] hover:bg-[#144a2d]" data-testid="register-seller-btn">
@@ -322,6 +371,13 @@ const DashboardPage = () => {
                 <div><Label>WhatsApp Number *</Label>
                   <Input placeholder="+237XXXXXXXXX" value={registerData.whatsapp}
                     onChange={(e) => setRegisterData({ ...registerData, whatsapp: e.target.value })} />
+                </div>
+                <div><Label>National ID Number or Business Registration Number *</Label>
+                  <Input placeholder="e.g. CNI number or RCCM number" value={registerData.id_document}
+                    onChange={(e) => setRegisterData({ ...registerData, id_document: e.target.value })} />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Used by our team to verify you before approving your shop. Not shown publicly.
+                  </p>
                 </div>
 
                 {/* Shop logo upload */}
@@ -381,6 +437,9 @@ const DashboardPage = () => {
         </div>
 
         <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={handleDownloadCatalog} data-testid="download-catalog-btn">
+            <Download size={18} className="mr-2" />Download Catalog
+          </Button>
           {/* Edit Shop Dialog */}
           <Dialog open={editShopOpen} onOpenChange={setEditShopOpen}>
             <DialogTrigger asChild>

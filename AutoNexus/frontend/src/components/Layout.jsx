@@ -96,19 +96,19 @@ const Layout = () => {
                     >
                       <User size={18} />
                       <span className="hidden md:inline max-w-[100px] truncate">
-                        {user?.name || user?.phone}
+                        {user?.name || user?.phone || user?.email}
                       </span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-48">
                     <DropdownMenuItem className="text-gray-500 text-sm">
-                      {user?.phone}
+                      {user?.phone || user?.email}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    {isSeller && (
+                    {isAuthenticated && (
                       <DropdownMenuItem onClick={() => navigate("/dashboard")} data-testid="dashboard-menu-item">
                         <LayoutDashboard size={16} className="mr-2" />
-                        Dashboard
+                        {isSeller ? "Dashboard" : "Become a Seller"}
                       </DropdownMenuItem>
                     )}
                     {isAdmin && (
@@ -163,7 +163,7 @@ const Layout = () => {
                   <span className="font-medium">{item.label}</span>
                 </Link>
               ))}
-              {isSeller && (
+              {isAuthenticated && (
                 <Link
                   to="/dashboard"
                   onClick={() => setMobileMenuOpen(false)}
@@ -174,7 +174,7 @@ const Layout = () => {
                   }`}
                 >
                   <LayoutDashboard size={20} />
-                  <span className="font-medium">Dashboard</span>
+                  <span className="font-medium">{isSeller ? "Dashboard" : "Become a Seller"}</span>
                 </Link>
               )}
               {isAdmin && (
@@ -221,7 +221,7 @@ const Layout = () => {
                 <li><Link to="/search" className="hover:text-white transition-colors">Search Parts</Link></li>
                 <li><Link to="/sellers" className="hover:text-white transition-colors">Find Sellers</Link></li>
                 <li><Link to="/requests" className="hover:text-white transition-colors">Part Requests</Link></li>
-                <li><Link to="/login" className="hover:text-white transition-colors">Become a Seller</Link></li>
+                <li><Link to="/dashboard" className="hover:text-white transition-colors">Become a Seller</Link></li>
               </ul>
             </div>
 
@@ -235,11 +235,11 @@ const Layout = () => {
                 </li>
                 <li className="flex items-center gap-2">
                   <Phone size={16} />
-                  <span>+237 6XX XXX XXX</span>
+                  <span>+237 654378658</span>
                 </li>
               </ul>
               <a 
-                href="https://wa.me/237677123456" 
+                href="https://wa.me/237654378658" 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 mt-4 bg-[#25D366] text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-[#128C7E] transition-colors"

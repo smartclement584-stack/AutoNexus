@@ -2,25 +2,40 @@ import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
-import { 
-  ArrowLeft, 
-  MessageCircle, 
-  Phone, 
-  Star, 
-  CheckCircle, 
+import {
+  ArrowLeft,
+  MessageCircle,
+  Phone,
+  Star,
+  CheckCircle,
   MapPin,
   Loader2,
   ChevronRight,
-  Package
+  Package,
+  Clock
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import ProductCard from "../components/ProductCard";
 
+const formatLastActive = (iso) => {
+  const then = new Date(iso);
+  const diffMs = Date.now() - then.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 5) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
 
 const SellerPage = () => {
   const { id } = useParams();
   const [seller, setSeller] = useState(null);
+  const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,6 +43,12 @@ const SellerPage = () => {
       try {
         const res = await axios.get(`${API}/sellers/${id}`);
         setSeller(res.data);
+        try {
+          const rres = await axios.get(`${API}/sellers/${id}/ratings`);
+          setReviews(rres.data.ratings);
+        } catch (e) {
+          console.error("Error loading reviews:", e);
+        }
       } catch (error) {
         console.error("Error loading seller:", error);
       } finally {
@@ -117,17 +138,29 @@ const SellerPage = () => {
             </div>
 
             {/* Stats */}
-            <div className="flex items-center justify-center md:justify-start gap-4 text-sm text-gray-600 mb-3">
+            <div className="flex items-center justify-center md:justify-start gap-4 text-sm text-gray-600 mb-3 flex-wrap">
               <div className="flex items-center gap-1">
                 <Star size={16} className="fill-yellow-400 text-yellow-400" />
-                <span className="font-medium">{seller.rating?.toFixed(1)}</span>
-                <span className="text-gray-400">rating</span>
+                {seller.rating_count > 0 ? (
+                  <>
+                    <span className="font-medium">{seller.rating?.toFixed(1)}</span>
+                    <span className="text-gray-400">({seller.rating_count})</span>
+                  </>
+                ) : (
+                  <span className="text-gray-400">No ratings yet</span>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <Package size={16} className="text-gray-400" />
                 <span className="font-medium">{seller.sales_count}</span>
                 <span className="text-gray-400">sales</span>
               </div>
+              {seller.last_active && (
+                <div className="flex items-center gap-1">
+                  <Clock size={16} className="text-gray-400" />
+                  <span className="text-gray-400">Active {formatLastActive(seller.last_active)}</span>
+                </div>
+              )}
             </div>
 
             {/* Location */}
@@ -186,6 +219,34 @@ const SellerPage = () => {
           </div>
         )}
       </section>
+
+      {/* Reviews */}
+      {reviews.length > 0 && (
+        <section className="mt-12">
+          <h2
+            className="text-xl md:text-2xl font-bold text-gray-900 mb-6"
+            style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
+          >
+            Buyer Reviews
+          </h2>
+          <div className="space-y-4">
+            {reviews.map((rev) => (
+              <div key={rev.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="flex">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star key={s} size={14}
+                        className={s <= rev.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"} />
+                    ))}
+                  </div>
+                  <span className="text-sm font-medium text-gray-700">{rev.user_name || "Buyer"}</span>
+                </div>
+                {rev.comment && <p className="text-sm text-gray-600">{rev.comment}</p>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

@@ -34,13 +34,17 @@ export const AuthProvider = ({ children }) => {
     loadUser();
   }, [token]);
 
-  const sendOtp = async (phone) => {
-    const response = await axios.post(`${API}/auth/send-otp`, { phone });
-    return response.data;
+  const signup = async ({ name, phone, email, password }) => {
+    const response = await axios.post(`${API}/auth/signup`, { name, phone, email, password });
+    const { token: newToken, user: userData } = response.data;
+    localStorage.setItem("autonexus_token", newToken);
+    setToken(newToken);
+    setUser(userData);
+    return userData;
   };
 
-  const verifyOtp = async (phone, code) => {
-    const response = await axios.post(`${API}/auth/verify-otp`, { phone, code });
+  const login = async (identifier, password) => {
+    const response = await axios.post(`${API}/auth/login`, { identifier, password });
     const { token: newToken, user: userData } = response.data;
     localStorage.setItem("autonexus_token", newToken);
     setToken(newToken);
@@ -88,8 +92,8 @@ export const AuthProvider = ({ children }) => {
     user,
     token,
     loading,
-    sendOtp,
-    verifyOtp,
+    signup,
+    login,
     logout,
     updateProfile,
     getAuthHeader,
