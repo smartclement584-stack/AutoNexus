@@ -1,6 +1,5 @@
 import { API } from "../lib/constants";
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -28,9 +27,8 @@ import {
 import { useAuth } from "../context/AuthContext";
 
 const DashboardPage = () => {
-  const navigate = useNavigate();
   // FIX: use stable getAuthHeader from useCallback in AuthContext — no more infinite loops
-  const { user, isAuthenticated, isSeller, getAuthHeader } = useAuth();
+  const { user, isSeller, getAuthHeader } = useAuth();
   const [parts, setParts] = useState([]);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,12 +66,6 @@ const DashboardPage = () => {
   });
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      toast.error("Please login to access dashboard");
-      navigate("/login", { state: { from: { pathname: "/dashboard" } } });
-      return;
-    }
-
     const loadData = async () => {
       try {
         const [brandsRes, categoriesRes, yearsRes] = await Promise.all([
@@ -112,7 +104,7 @@ const DashboardPage = () => {
       }
     };
     loadData();
-  }, [isAuthenticated, isSeller, navigate, getAuthHeader]);
+  }, [isSeller, getAuthHeader]);
 
   // Load the models available for whichever brands are currently checked in the part form,
   // so the seller can mark which models a part fits. Merges results across multiple brands.

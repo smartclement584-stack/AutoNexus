@@ -1,6 +1,7 @@
 import { API } from "../lib/constants";
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import axios from "axios";
+import { toast } from "sonner";
 
 const AuthContext = createContext(null);
 
@@ -34,6 +35,38 @@ export const AuthProvider = ({ children }) => {
     loadUser();
   }, [token]);
 
+  // Global 401 handling. Route guards (ProtectedRoute) only run when the
+  // user navigates — they can't catch a token expiring while the user sits
+  // on a page making API calls (e.g. leaves a dashboard tab open past the
+  // token's 7-day lifetime). Without this, those calls fail silently
+  // (console.error only) and the page just looks broken with no
+  // explanation. This catches every 401 from any request in one place,
+  // clears the stale session, and lets the router react — AuthContext lives
+  // outside BrowserRouter and has no navigate() of its own by design; the
+  // next render of any ProtectedRoute-guarded page sees isAuthenticated
+  // become false and redirects on its own.
+  useEffect(() => {
+    const interceptorId = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        const status = error.response?.status;
+        const url = error.config?.url || "";
+        // Don't treat a failed login/signup attempt (wrong password, e.g.)
+        // as a "session expired" event — there's no session yet to expire.
+        const isAuthAttempt = url.includes("/auth/login") || url.includes("/auth/signup");
+
+        if (status === 401 && !isAuthAttempt && localStorage.getItem("autonexus_token")) {
+          localStorage.removeItem("autonexus_token");
+          setToken(null);
+          setUser(null);
+          toast.error("Your session has expired. Please log in again.");
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptorId);
+  }, []);
+
   const signup = async ({ name, phone, email, password }) => {
     const response = await axios.post(`${API}/auth/signup`, { name, phone, email, password });
     const { token: newToken, user: userData } = response.data;
@@ -50,6 +83,24 @@ export const AuthProvider = ({ children }) => {
     setToken(newToken);
     setUser(userData);
     return userData;
+  };
+
+  // Both intentionally do NOT touch token/user state — the person isn't
+  // logged in yet during this flow (or shouldn't be assumed to be), and a
+  // successful reset should always land them back on the login form to
+  // authenticate fresh with the new password, not silently sign them in.
+  const forgotPassword = async (identifier) => {
+    const response = await axios.post(`${API}/auth/forgot-password`, { identifier });
+    return response.data;
+  };
+
+  const resetPassword = async (identifier, code, newPassword) => {
+    const response = await axios.post(`${API}/auth/reset-password`, {
+      identifier,
+      code,
+      new_password: newPassword,
+    });
+    return response.data;
   };
 
   const logout = () => {
@@ -95,6 +146,8 @@ export const AuthProvider = ({ children }) => {
     signup,
     login,
     logout,
+    forgotPassword,
+    resetPassword,
     updateProfile,
     getAuthHeader,
     toggleFavorite,

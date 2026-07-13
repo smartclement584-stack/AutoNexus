@@ -20,7 +20,7 @@ import { useAuth } from "../context/AuthContext";
 
 const CreateRequestPage = () => {
   const navigate = useNavigate();
-  const { isAuthenticated, getAuthHeader } = useAuth();
+  const { getAuthHeader } = useAuth();
   const [loading, setLoading] = useState(false);
   const [brands, setBrands] = useState([]);
   const [models, setModels] = useState([]);
@@ -37,12 +37,6 @@ const CreateRequestPage = () => {
   });
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      toast.error("Please login to post a request");
-      navigate("/login");
-      return;
-    }
-
     const loadFilters = async () => {
       try {
         const [brandsRes, yearsRes] = await Promise.all([
@@ -56,7 +50,7 @@ const CreateRequestPage = () => {
       }
     };
     loadFilters();
-  }, [isAuthenticated, navigate]);
+  }, []);
 
   // Load models when brand changes
   useEffect(() => {

@@ -1,9 +1,13 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, UploadFile, File, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, UploadFile, File, Response, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 import logging
 import shutil
@@ -15,6 +19,7 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import re
 import bcrypt
+import secrets
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -31,12 +36,37 @@ if not JWT_SECRET:
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24 * 7  # 7 days
 
+# SECURITY: this must be false/unset in production. It exists purely so this
+# codebase can be tested locally without real Twilio/email credentials. When
+# true, a password-reset code that couldn't be delivered through a real
+# channel is echoed back in the API response instead of only being logged
+# server-side. That is a real account-takeover risk if it's ever accidentally
+# left on in a live deployment — see deliver_reset_code() and
+# /auth/forgot-password for exactly where this is used.
+DEV_EXPOSE_RESET_CODES = os.environ.get('DEV_EXPOSE_RESET_CODES', 'false').lower() == 'true'
+
 # Image upload directory
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Create the main app
 app = FastAPI(title="AutoNexus API", version="1.0.0")
+
+# Rate limiting — protects /auth/login and /auth/signup from brute-force and
+# spam. Keyed by client IP; 5 attempts/minute is generous for a real user
+# (who mistypes a password once or twice) but blocks automated guessing.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    # Shaped as {"detail": ...} to match every other error response in this
+    # API, so the frontend's existing `error.response?.data?.detail` handling
+    # picks it up with no frontend changes required.
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many attempts. Please wait a minute and try again."}
+    )
 
 # FIX: Register CORS middleware immediately after app creation, before routes
 app.add_middleware(
@@ -69,6 +99,19 @@ class User(UserBase):
     seller_id: Optional[str] = None
     favorites: List[str] = []  # list of part IDs
     is_admin: bool = False
+    # Bumped whenever the password is reset, so JWTs issued before the reset
+    # stop being accepted (see create_token / get_current_user). Existing
+    # documents without this field default to 0 via .get() reads elsewhere —
+    # no migration needed.
+    token_version: int = 0
+
+class ForgotPasswordRequest(BaseModel):
+    identifier: str  # phone or email
+
+class ResetPasswordRequest(BaseModel):
+    identifier: str  # same identifier used to request the code
+    code: str
+    new_password: str
 
 class SignupRequest(BaseModel):
     name: Optional[str] = None
@@ -243,10 +286,99 @@ def verify_password(password: str, password_hash: str) -> bool:
     except ValueError:
         return False
 
-def create_token(user_id: str, role: str):
+# Computed once at process startup so failed logins for a non-existent
+# identifier still pay the same bcrypt cost as a real password check —
+# without this, response time itself would leak whether an account exists.
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"timing-attack-mitigation", bcrypt.gensalt()).decode("utf-8")
+
+def normalize_phone(raw: str) -> str:
+    """Canonicalize a user-typed phone number to the +237XXXXXXXXX form used
+    in storage, so login lookups match regardless of how the user typed it
+    (with/without +237, with 0 prefix, with spaces)."""
+    digits = re.sub(r'[^\d+]', '', raw.strip())
+    if digits.startswith('+237'):
+        return digits
+    if digits.startswith('237'):
+        return '+' + digits
+    if digits.startswith('0'):
+        digits = digits[1:]
+    if len(digits) == 9:
+        return '+237' + digits
+    return digits
+
+def generate_reset_code() -> str:
+    """Cryptographically secure 6-digit numeric code (NOT the `random`
+    module — that's not safe for anything security-sensitive, since its
+    output is predictable given enough samples). secrets.randbelow draws
+    from the OS's CSPRNG."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+async def deliver_reset_code(user: dict, code: str) -> dict:
+    """
+    Sends a password-reset code via whichever channel matches how the user
+    registered — SMS/WhatsApp for a phone account, email for an email
+    account. Never raises: a delivery failure must not change the shape of
+    the API response, or it becomes an account-enumeration signal.
+
+    Returns {"delivered": bool, "channel": str, "demo_code": str|None}.
+    `demo_code` is only ever populated when there was no real channel to
+    send through — see DEV_EXPOSE_RESET_CODES for the one place that's
+    allowed to leave this repo's process.
+    """
+    if user.get("phone"):
+        twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+        twilio_token = os.environ.get('TWILIO_AUTH_TOKEN')
+        twilio_sms_from = os.environ.get('TWILIO_PHONE_NUMBER')
+        twilio_wa_from = os.environ.get('TWILIO_WHATSAPP_NUMBER')
+
+        if twilio_sid and twilio_token and (twilio_sms_from or twilio_wa_from):
+            try:
+                from twilio.rest import Client as TwilioClient
+                tc = TwilioClient(twilio_sid, twilio_token)
+                body = (
+                    f"Your AutoNexus password reset code is {code}. "
+                    f"It expires in 10 minutes. Never share this code with anyone."
+                )
+                if twilio_sms_from:
+                    tc.messages.create(body=body, from_=twilio_sms_from, to=user["phone"])
+                else:
+                    tc.messages.create(body=body, from_=twilio_wa_from, to=f"whatsapp:{user['phone']}")
+                return {"delivered": True, "channel": "sms", "demo_code": None}
+            except Exception as e:
+                logger.error(f"Reset code SMS delivery failed for user_id={user['id']}: {e}")
+                return {"delivered": False, "channel": "sms", "demo_code": code}
+        else:
+            logger.warning(f"TWILIO not configured — reset code for user_id={user['id']} not sent (demo mode)")
+            return {"delivered": False, "channel": "demo", "demo_code": code}
+    else:
+        # Pluggable seam for an email provider (SendGrid, Mailgun, AWS SES,
+        # SMTP...). None is wired up yet — when one is, check its env var(s)
+        # here the same way Twilio is checked above, and send through its
+        # SDK inside the try block. Until then this always falls through to
+        # demo mode for email accounts.
+        email_provider_key = os.environ.get('SENDGRID_API_KEY')  # example seam
+        if email_provider_key:
+            try:
+                # e.g.:
+                # from sendgrid import SendGridAPIClient
+                # from sendgrid.helpers.mail import Mail
+                # sg = SendGridAPIClient(email_provider_key)
+                # sg.send(Mail(from_email=..., to_emails=user["email"],
+                #              subject="Your AutoNexus reset code",
+                #              plain_text_content=f"Your code is {code}..."))
+                raise NotImplementedError("Wire up an email provider SDK here")
+            except Exception as e:
+                logger.error(f"Reset code email delivery failed for user_id={user['id']}: {e}")
+                return {"delivered": False, "channel": "email", "demo_code": code}
+        else:
+            logger.warning(f"No email provider configured — reset code for user_id={user['id']} not sent (demo mode)")
+            return {"delivered": False, "channel": "demo", "demo_code": code}
+
+def create_token(user_id: str, role: str, token_version: int = 0):
     payload = {
         "user_id": user_id,
         "role": role,
+        "token_version": token_version,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -365,6 +497,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        if payload.get("token_version", 0) != user.get("token_version", 0):
+            # Password was reset since this token was issued — the old
+            # session must not keep working after that.
+            raise HTTPException(status_code=401, detail="Session expired, please log in again")
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -377,6 +513,8 @@ async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
+        if not user or payload.get("token_version", 0) != user.get("token_version", 0):
+            return None
         return user
     except:
         return None
@@ -389,8 +527,9 @@ async def get_current_admin(user: dict = Depends(get_current_user)):
 # ============== AUTH ROUTES ==============
 
 @api_router.post("/auth/signup")
-async def signup(data: SignupRequest):
-    phone = data.phone.strip() if data.phone else None
+@limiter.limit("5/minute")
+async def signup(request: Request, data: SignupRequest):
+    phone = normalize_phone(data.phone) if data.phone else None
     email = data.email.strip().lower() if data.email else None
 
     if not phone and not email:
@@ -422,25 +561,155 @@ async def signup(data: SignupRequest):
     )
     user_dict = new_user.model_dump()
     user_dict['created_at'] = user_dict['created_at'].isoformat()
+    # A sparse unique index only excludes a document when the field is
+    # ABSENT, not when it's present as `null` -- model_dump() always emits
+    # `phone`/`email` even when unset, so without this, the second phone-only
+    # (or email-only) signup would collide on a stored `null` and crash with
+    # a raw DuplicateKeyError instead of ever reaching this line.
+    if user_dict.get('phone') is None:
+        del user_dict['phone']
+    if user_dict.get('email') is None:
+        del user_dict['email']
     await db.users.insert_one(user_dict)
 
-    token = create_token(user_dict["id"], user_dict["role"])
+    token = create_token(user_dict["id"], user_dict["role"], user_dict.get("token_version", 0))
     return {"token": token, "user": public_user(user_dict)}
 
 @api_router.post("/auth/login")
-async def login(data: LoginRequest):
+@limiter.limit("5/minute")
+async def login(request: Request, data: LoginRequest):
     identifier = data.identifier.strip()
     is_email = "@" in identifier
-    query = {"email": identifier.lower()} if is_email else {"phone": identifier}
+    query = {"email": identifier.lower()} if is_email else {"phone": normalize_phone(identifier)}
 
     user = await db.users.find_one(query, {"_id": 0})
-    if not user or not verify_password(data.password, user.get("password_hash", "")):
+    if not user:
+        verify_password(data.password, _DUMMY_PASSWORD_HASH)  # pay the same bcrypt cost either way
+        logger.warning(f"Login failed: no user for query type={'email' if is_email else 'phone'}")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not verify_password(data.password, user.get("password_hash", "")):
+        logger.warning(f"Login failed: password mismatch for user_id={user['id']}")
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_token(user["id"], user["role"])
+    token = create_token(user["id"], user["role"], user.get("token_version", 0))
     if user.get("seller_id"):
         await touch_seller_activity(user["seller_id"])
     return {"token": token, "user": public_user(user)}
+
+@api_router.post("/auth/forgot-password")
+@limiter.limit("3/hour")
+async def forgot_password(request: Request, data: ForgotPasswordRequest):
+    """
+    Always returns the same generic message regardless of whether the
+    identifier matches an account — this is the primary anti-enumeration
+    control for this endpoint. Never branch the response body on whether a
+    user was found.
+    """
+    identifier = data.identifier.strip()
+    is_email = "@" in identifier
+    query = {"email": identifier.lower()} if is_email else {"phone": normalize_phone(identifier)}
+
+    generic_response = {
+        "message": "If an account exists for that phone or email, a reset code has been sent."
+    }
+
+    user = await db.users.find_one(query, {"_id": 0})
+    if not user:
+        logger.info(f"Forgot-password requested for unknown identifier type={'email' if is_email else 'phone'}")
+        return generic_response
+
+    code = generate_reset_code()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "reset_code_hash": hash_password(code),
+            "reset_code_expires": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+            "reset_code_attempts": 0,
+        }}
+    )
+
+    delivery = await deliver_reset_code(user, code)
+    logger.info(
+        f"Forgot-password code issued for user_id={user['id']} "
+        f"channel={delivery['channel']} delivered={delivery['delivered']}"
+    )
+
+    # DEV-ONLY escape hatch — see the DEV_EXPOSE_RESET_CODES definition for
+    # why this must never be true in production. Note this necessarily
+    # reveals account existence (the field is only present when a real user
+    # was found) — an explicit, opt-in trade-off for local testability, not
+    # something that can happen by accident with the flag unset.
+    if DEV_EXPOSE_RESET_CODES and not delivery["delivered"]:
+        generic_response["dev_code"] = delivery["demo_code"]
+        generic_response["dev_note"] = (
+            "DEV MODE ONLY — no SMS/email provider is configured, so the code "
+            "is included here instead of actually being sent. This field will "
+            "not exist in production (DEV_EXPOSE_RESET_CODES must stay unset)."
+        )
+
+    return generic_response
+
+@api_router.post("/auth/reset-password")
+@limiter.limit("10/hour")
+async def reset_password(request: Request, data: ResetPasswordRequest):
+    identifier = data.identifier.strip()
+    is_email = "@" in identifier
+    query = {"email": identifier.lower()} if is_email else {"phone": normalize_phone(identifier)}
+
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    # Every failure path below raises the exact same message. Distinguishing
+    # "no such user" from "wrong code" from "expired" from "too many tries"
+    # would both leak account existence and hand an attacker a signal about
+    # how close a guess was — so all of them collapse to one response.
+    generic_error = HTTPException(status_code=400, detail="Invalid or expired code")
+
+    user = await db.users.find_one(query, {"_id": 0})
+    if not user:
+        verify_password(data.code, _DUMMY_PASSWORD_HASH)  # pay the same bcrypt cost either way
+        raise generic_error
+
+    reset_hash = user.get("reset_code_hash")
+    reset_expires = user.get("reset_code_expires")
+    attempts = user.get("reset_code_attempts", 0)
+
+    if not reset_hash or not reset_expires:
+        verify_password(data.code, _DUMMY_PASSWORD_HASH)
+        raise generic_error
+
+    if attempts >= 5:
+        raise HTTPException(status_code=400, detail="Too many incorrect attempts. Please request a new code.")
+
+    if datetime.now(timezone.utc) > datetime.fromisoformat(reset_expires):
+        # Clean up the stale code so it can't be brute-forced after expiry either.
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$unset": {"reset_code_hash": "", "reset_code_expires": "", "reset_code_attempts": ""}}
+        )
+        raise generic_error
+
+    if not verify_password(data.code, reset_hash):
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"reset_code_attempts": 1}})
+        logger.warning(f"Reset-password: wrong code for user_id={user['id']} (attempt {attempts + 1}/5)")
+        raise generic_error
+
+    if verify_password(data.new_password, user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="New password must be different from your current password")
+
+    # Success: set the new password, invalidate the code (single-use), and
+    # bump token_version so any JWT issued before this reset — including one
+    # an attacker may have already stolen — stops being accepted.
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {"password_hash": hash_password(data.new_password)},
+            "$unset": {"reset_code_hash": "", "reset_code_expires": "", "reset_code_attempts": ""},
+            "$inc": {"token_version": 1},
+        }
+    )
+    logger.info(f"Password reset successful for user_id={user['id']}")
+    return {"message": "Password updated successfully. Please log in with your new password."}
 
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
@@ -491,22 +760,62 @@ async def remove_favorite(part_id: str, user: dict = Depends(get_current_user)):
 
 # ============== IMAGE UPLOAD ==============
 
+UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+
+# Maps a validated Content-Type to the ONLY extension we'll ever write to disk.
+# The extension must never be derived from the client-supplied filename --
+# that was a path-traversal arbitrary-file-write vector (a crafted filename
+# like "x.png/../../../backend/server.py" became the literal write path).
+UPLOAD_CONTENT_TYPES = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+
+def _sniff_image_signature(header: bytes, content_type: str) -> bool:
+    """Verify the first bytes actually match the claimed image type.
+    Content-Type is a client-supplied header and proves nothing on its own --
+    without this, the allowlist check above can be trivially bypassed by
+    lying about the header."""
+    if content_type in ("image/jpeg", "image/jpg"):
+        return header[:3] == b"\xff\xd8\xff"
+    if content_type == "image/png":
+        return header[:8] == b"\x89PNG\r\n\x1a\n"
+    if content_type == "image/webp":
+        return header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    return False
+
 @api_router.post("/upload/image")
 async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Upload a part image. Returns the URL path."""
-    # Validate type
-    allowed = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
-    if file.content_type not in allowed:
+    if file.content_type not in UPLOAD_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed")
 
-    # Validate size (5MB)
-    contents = await file.read()
-    if len(contents) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image must be under 5MB")
+    # Read in bounded chunks so an oversized upload is rejected as soon as it
+    # crosses the limit, instead of being fully buffered into memory first.
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > UPLOAD_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="Image must be under 5MB")
+        chunks.append(chunk)
+    contents = b"".join(chunks)
 
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
+    if not _sniff_image_signature(contents[:12], file.content_type):
+        raise HTTPException(status_code=400, detail="File content doesn't match a valid image")
+
+    ext = UPLOAD_CONTENT_TYPES[file.content_type]
     filename = f"{uuid.uuid4()}.{ext}"
-    filepath = UPLOAD_DIR / filename
+    filepath = (UPLOAD_DIR / filename).resolve()
+    if not filepath.is_relative_to(UPLOAD_DIR.resolve()):
+        # Should be unreachable given `ext` is one of three hardcoded values
+        # above -- kept as a last-line-of-defense assertion, not a real gate.
+        raise HTTPException(status_code=400, detail="Invalid upload path")
 
     with open(filepath, "wb") as f:
         f.write(contents)
@@ -1300,140 +1609,6 @@ async def get_models(brand: Optional[str] = None):
 async def get_years():
     return {"years": [str(y) for y in range(2000, 2026)]}
 
-# ============== SEED DATA ==============
-
-@api_router.post("/seed")
-async def seed_database():
-    existing = await db.sellers.count_documents({})
-    if existing > 0:
-        return {"status": "already_seeded", "sellers": existing}
-
-    sellers_data = [
-        {"id": "seller-1", "name": "Akan Motor Parts", "location": "Camp Yabassi, Douala",
-         "description": "Specializing in Japanese and Korean vehicle parts since 2010. Quality assured parts with warranty.",
-         "phone": "+237677123456", "whatsapp": "+237677123456", "rating": 4.8, "rating_count": 60, "sales_count": 1250, "verified": True, "status": "approved",
-         "image": "https://images.unsplash.com/photo-1550505095-81378a674395?auto=format&fit=crop&q=80&w=400"},
-        {"id": "seller-2", "name": "Camp Auto Parts", "location": "Camp Yabassi, Douala",
-         "description": "Your one-stop shop for all car parts. New and quality used parts available.",
-         "phone": "+237699234567", "whatsapp": "+237699234567", "rating": 4.5, "rating_count": 45, "sales_count": 890, "verified": True, "status": "approved",
-         "image": "https://images.unsplash.com/photo-1644183230182-85bcf9b0ec5f?auto=format&fit=crop&q=80&w=400"},
-        {"id": "seller-3", "name": "Yabassi Spare Hub", "location": "Camp Yabassi, Douala",
-         "description": "Wholesale and retail of automobile spare parts. Best prices guaranteed.",
-         "phone": "+237655345678", "whatsapp": "+237655345678", "rating": 4.2, "rating_count": 30, "sales_count": 650, "verified": True, "status": "approved",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "seller-4", "name": "Tokyo Auto Spares", "location": "Camp Yabassi, Douala",
-         "description": "Direct import of genuine Japanese car parts. Specializing in Toyota and Nissan.",
-         "phone": "+237688456789", "whatsapp": "+237688456789", "rating": 4.7, "rating_count": 55, "sales_count": 1100, "verified": True, "status": "approved",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "seller-5", "name": "Korea Motors Parts", "location": "Camp Yabassi, Douala",
-         "description": "Specialists in Hyundai and Kia parts. Fast delivery within Douala.",
-         "phone": "+237666567890", "whatsapp": "+237666567890", "rating": 4.4, "rating_count": 38, "sales_count": 780, "verified": True, "status": "approved",
-         "image": "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=400"},
-    ]
-
-    parts_data = [
-        {"id": "part-1", "name": "Suspension Link (Stabilizer Bar)", "part_number": "K90666",
-         "description": "Front stabilizer bar link for improved handling and stability",
-         "category": "Suspension", "brands": ["Kia"], "models": ["Sportage"],
-         "years": ["2011","2012","2013","2014","2015"], "seller_id": "seller-1",
-         "price": 15000, "stock": 30, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-2", "name": "Suspension Link (Stabilizer Bar)", "part_number": "K90666",
-         "description": "Front stabilizer bar link - quality aftermarket",
-         "category": "Suspension", "brands": ["Kia"], "models": ["Sportage"],
-         "years": ["2011","2012","2013","2014","2015"], "seller_id": "seller-2",
-         "price": 16000, "stock": 40, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-3", "name": "Suspension Link (Stabilizer Bar)", "part_number": "K90666",
-         "description": "Stabilizer bar link with 6 months warranty",
-         "category": "Suspension", "brands": ["Kia"], "models": ["Sportage"],
-         "years": ["2011","2012","2013","2014","2015"], "seller_id": "seller-3",
-         "price": 17500, "stock": 18, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-4", "name": "Brake Pads Set (Front)", "part_number": "BP-TY-001",
-         "description": "Premium ceramic brake pads for smooth and quiet braking",
-         "category": "Brakes", "brands": ["Toyota"], "models": ["Corolla","Camry"],
-         "years": ["2005","2006","2007","2008","2009","2010"], "seller_id": "seller-1",
-         "price": 12000, "stock": 50, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-5", "name": "Brake Pads Set (Front)", "part_number": "BP-TY-001",
-         "description": "Quality brake pads - fits Corolla and Camry",
-         "category": "Brakes", "brands": ["Toyota"], "models": ["Corolla","Camry"],
-         "years": ["2005","2006","2007","2008","2009","2010"], "seller_id": "seller-4",
-         "price": 11500, "stock": 35, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-6", "name": "Oil Filter", "part_number": "OF-NS-002",
-         "description": "High quality oil filter for Nissan vehicles",
-         "category": "Filters", "brands": ["Nissan"], "models": ["Almera","Sentra","X-Trail"],
-         "years": ["2008","2009","2010","2011","2012","2013","2014","2015"], "seller_id": "seller-2",
-         "price": 3500, "stock": 100, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-7", "name": "Air Filter", "part_number": "AF-HY-003",
-         "description": "Engine air filter for optimal performance",
-         "category": "Filters", "brands": ["Hyundai"], "models": ["Accent","Elantra"],
-         "years": ["2010","2011","2012","2013","2014","2015"], "seller_id": "seller-5",
-         "price": 4500, "stock": 65, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-8", "name": "Starter Motor", "part_number": "SM-TY-004",
-         "description": "Rebuilt starter motor with 1 year warranty",
-         "category": "Engine Parts", "brands": ["Toyota"], "models": ["Corolla"],
-         "years": ["2005","2006","2007","2008","2009"], "seller_id": "seller-1",
-         "price": 45000, "stock": 8, "condition": "used",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-9", "name": "Alternator", "part_number": "ALT-NS-005",
-         "description": "New alternator for Nissan vehicles",
-         "category": "Engine Parts", "brands": ["Nissan"], "models": ["Almera","Primera"],
-         "years": ["2006","2007","2008","2009","2010","2011"], "seller_id": "seller-4",
-         "price": 55000, "stock": 12, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-10", "name": "Radiator", "part_number": "RAD-MT-006",
-         "description": "Aluminum radiator for efficient cooling",
-         "category": "Cooling System", "brands": ["Mitsubishi"], "models": ["Lancer","Outlander"],
-         "years": ["2008","2009","2010","2011","2012"], "seller_id": "seller-3",
-         "price": 38000, "stock": 15, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-11", "name": "Battery 60Ah", "part_number": "BAT-60",
-         "description": "Maintenance-free battery with 18 months warranty",
-         "category": "Electrical", "brands": ["Toyota","Nissan","Hyundai","Kia"],
-         "models": ["Corolla","Almera","Accent","Rio"],
-         "years": ["2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020"],
-         "seller_id": "seller-2", "price": 30000, "stock": 25, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1767990495521-95cceb571125?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-12", "name": "Fuel Pump", "part_number": "FP-SZ-007",
-         "description": "Electric fuel pump assembly",
-         "category": "Fuel System", "brands": ["Suzuki"], "models": ["Swift","Vitara"],
-         "years": ["2008","2009","2010","2011","2012","2013","2014"], "seller_id": "seller-3",
-         "price": 28000, "stock": 20, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-13", "name": "Shock Absorber (Front)", "part_number": "SA-MZ-008",
-         "description": "Gas-filled shock absorber for smooth ride",
-         "category": "Suspension", "brands": ["Mazda"], "models": ["323","626"],
-         "years": ["2002","2003","2004","2005","2006","2007"], "seller_id": "seller-1",
-         "price": 22000, "stock": 18, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-14", "name": "Timing Belt Kit", "part_number": "TB-DW-009",
-         "description": "Complete timing belt kit with tensioner and water pump",
-         "category": "Engine Parts", "brands": ["Daewoo"], "models": ["Matiz","Lanos","Nubira"],
-         "years": ["2000","2001","2002","2003","2004","2005"], "seller_id": "seller-5",
-         "price": 35000, "stock": 10, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1656597631995-9fa0e1072279?auto=format&fit=crop&q=80&w=400"},
-        {"id": "part-15", "name": "Headlight Assembly (Left)", "part_number": "HL-KI-010",
-         "description": "OEM style headlight assembly",
-         "category": "Body Parts", "brands": ["Kia"], "models": ["Cerato","Optima"],
-         "years": ["2012","2013","2014","2015","2016"], "seller_id": "seller-5",
-         "price": 42000, "stock": 6, "condition": "new",
-         "image": "https://images.unsplash.com/photo-1600661653561-629509216228?auto=format&fit=crop&q=80&w=400"},
-    ]
-
-    for seller in sellers_data:
-        seller['created_at'] = datetime.now(timezone.utc).isoformat()
-        await db.sellers.insert_one(seller)
-    for part in parts_data:
-        part['created_at'] = datetime.now(timezone.utc).isoformat()
-        await db.parts.insert_one(part)
-
-    return {"status": "seeded", "sellers": len(sellers_data), "parts": len(parts_data)}
-
 # ============== ROOT & HEALTH ==============
 
 @api_router.get("/")
@@ -1477,6 +1652,16 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def create_indexes():
+    # Data-hygiene pass for documents written before the /auth/signup fix:
+    # a sparse index only excludes a document when the field is ABSENT, not
+    # when it's stored as `null`, so any user created with only a phone (or
+    # only an email) previously got the other field written as an explicit
+    # null -- colliding with the next such user under the unique index below.
+    # Unsetting the key restores real sparse behavior. Idempotent: matches
+    # nothing once a database has been cleaned once.
+    await db.users.update_many({"phone": None}, {"$unset": {"phone": ""}})
+    await db.users.update_many({"email": None}, {"$unset": {"email": ""}})
+
     await db.users.create_index("id", unique=True)
     await db.users.create_index("phone", unique=True, sparse=True)
     await db.users.create_index("email", unique=True, sparse=True)

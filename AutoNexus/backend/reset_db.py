@@ -37,7 +37,7 @@ async def main():
         for coll in ["sellers", "parts", "requests", "ratings"]:
             await db[coll].drop()
             print(f"Dropped {coll} collection.")
-        print("\nFull reset done. Restart the server — it will reseed demo sellers/parts.")
+        print("\nFull reset done. Run `py seed_demo_data.py` to reload demo sellers/parts.")
     else:
         # Just clear conflicting indexes on sellers so startup can recreate them
         try:

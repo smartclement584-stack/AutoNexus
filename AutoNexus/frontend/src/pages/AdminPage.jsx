@@ -1,6 +1,5 @@
 import { API } from "../lib/constants";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -27,8 +26,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 
 const AdminPage = () => {
-  const navigate = useNavigate();
-  const { isAuthenticated, isAdmin, getAuthHeader } = useAuth();
+  const { isAdmin, getAuthHeader } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [sellers, setSellers] = useState([]);
@@ -67,19 +65,6 @@ const AdminPage = () => {
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState("");
   const [usersLoading, setUsersLoading] = useState(true);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      toast.error("Please login to access the admin panel");
-      navigate("/login", { state: { from: { pathname: "/admin" } } });
-      return;
-    }
-    if (!isAdmin) {
-      toast.error("Admin access required");
-      navigate("/");
-      return;
-    }
-  }, [isAuthenticated, isAdmin, navigate]);
 
   const loadStats = useCallback(async () => {
     try {

@@ -88,10 +88,11 @@ class AutoNexusAPITester:
         # Health check
         self.run_test("Health Check", "GET", "/health")
 
-    def test_seed_data(self):
-        """Test database seeding"""
-        self.log("\n=== Testing Database Seeding ===")
-        self.run_test("Seed Database", "POST", "/seed")
+    # NOTE: /seed was intentionally removed — it was an unauthenticated write
+    # endpoint. Demo data provisioning is now a manual step
+    # (`py seed_demo_data.py`), not part of the HTTP API, so it's no longer
+    # something this suite tests. Run that script against your test DB before
+    # running this suite if you need demo data present.
 
     def test_filter_endpoints(self):
         """Test filter endpoints for brands, categories, models, years"""
@@ -366,7 +367,6 @@ class AutoNexusAPITester:
         
         # Run tests in logical order
         self.test_health_endpoints()
-        self.test_seed_data()
         self.test_filter_endpoints()
         self.test_parts_endpoints() 
         self.test_sellers_endpoints()

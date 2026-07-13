@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Phone, Mail, Lock, User, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -10,7 +10,7 @@ import { useAuth } from "../context/AuthContext";
 const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signup, login, isAuthenticated } = useAuth();
+  const { signup, login } = useAuth();
 
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [contactType, setContactType] = useState("phone"); // "phone" | "email" — signup only
@@ -20,12 +20,6 @@ const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-
-  if (isAuthenticated) {
-    const from = location.state?.from?.pathname || "/";
-    navigate(from, { replace: true });
-    return null;
-  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -200,6 +194,10 @@ const LoginPage = () => {
                   <Input
                     id="identifier"
                     type="text"
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck="false"
                     placeholder="+237XXXXXXXXX or you@example.com"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
@@ -217,6 +215,7 @@ const LoginPage = () => {
                 <Input
                   id="password"
                   type="password"
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
                   placeholder="At least 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -224,6 +223,15 @@ const LoginPage = () => {
                   data-testid="password-input"
                 />
               </div>
+              {mode === "login" && (
+                <Link
+                  to="/forgot-password"
+                  className="block text-right text-sm text-[#1a5c38] hover:underline mt-2"
+                  data-testid="forgot-password-link"
+                >
+                  Forgot password?
+                </Link>
+              )}
             </div>
 
             <Button

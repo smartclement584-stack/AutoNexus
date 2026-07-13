@@ -54,9 +54,6 @@ const HomePage = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        // Seed database first
-        await axios.post(`${API}/seed`);
-        
         // Load brands
         const brandsRes = await axios.get(`${API}/filters/brands`);
         setBrands(brandsRes.data.brands);
