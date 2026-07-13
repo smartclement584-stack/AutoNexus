@@ -16,14 +16,61 @@ Safe to run more than once: it no-ops if sellers already exist, same as the
 old /api/seed endpoint did — the difference is this can now only be
 triggered by someone with shell access to the server, not by anyone on the
 internet.
+
+SAFETY: this refuses to run against anything that doesn't look like a local
+dev database (see _guard_against_production below). Fake demo sellers mixed
+into a real production DB with real trusted sellers is not something you
+can cleanly undo — the marker fields below exist specifically so it CAN be
+cleanly identified and undone if this guard is ever bypassed or the DB was
+seeded before this guard existed.
 """
 import asyncio
 import os
+import sys
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Substrings that mark a MONGO_URL as "obviously local dev" — anything else
+# is treated as potentially production and requires explicit confirmation.
+_LOCAL_MARKERS = ("localhost", "127.0.0.1")
+
+
+def _guard_against_production():
+    """Refuse to seed unless the target DB is clearly local, or the operator
+    has explicitly acknowledged the risk. Exits the process on refusal."""
+    mongo_url = os.environ.get("MONGO_URL", "")
+    db_name = os.environ.get("DB_NAME", "")
+    looks_local = any(marker in mongo_url for marker in _LOCAL_MARKERS)
+
+    if looks_local:
+        return  # normal local dev workflow, no extra friction
+
+    print("=" * 70)
+    print("WARNING: MONGO_URL does not look like a local database:")
+    print(f"    MONGO_URL = {mongo_url}")
+    print(f"    DB_NAME   = {db_name}")
+    print()
+    print("This script inserts 5 fake demo sellers and 15 fake demo parts.")
+    print("If this is your production database, real trusted sellers could")
+    print("end up mixed in with fake demo data.")
+    print("=" * 70)
+
+    if "--i-know-what-im-doing" not in sys.argv:
+        print()
+        print("Refusing to run. If you are SURE this is not production, re-run with:")
+        print("    py seed_demo_data.py --i-know-what-im-doing")
+        sys.exit(1)
+
+    # Even with the flag, require a typed confirmation that names the actual
+    # target DB — a flag alone is too easy to paste/reuse without reading it.
+    print()
+    confirmation = input(f"Type the database name ({db_name}) to confirm you want to seed it: ")
+    if confirmation != db_name:
+        print("Confirmation did not match. Aborting — nothing was written.")
+        sys.exit(1)
 
 SELLERS_DATA = [
     {"id": "seller-1", "name": "Akan Motor Parts", "location": "Camp Yabassi, Douala",
@@ -144,6 +191,8 @@ PARTS_DATA = [
 
 
 async def main():
+    _guard_against_production()
+
     client = AsyncIOMotorClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
 
@@ -153,11 +202,16 @@ async def main():
         print("Run `py reset_db.py --full` first if you want a totally clean slate.")
         return
 
+    # is_demo_data marks every document this script writes, so demo data can
+    # always be found and removed later with a single query even if it ends
+    # up somewhere it shouldn't — see the "Removing demo data" note below.
     for seller in SELLERS_DATA:
         seller["created_at"] = datetime.now(timezone.utc).isoformat()
+        seller["is_demo_data"] = True
         await db.sellers.insert_one(seller)
     for part in PARTS_DATA:
         part["created_at"] = datetime.now(timezone.utc).isoformat()
+        part["is_demo_data"] = True
         await db.parts.insert_one(part)
 
     print(f"Seeded {len(SELLERS_DATA)} sellers and {len(PARTS_DATA)} parts.")

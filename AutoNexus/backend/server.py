@@ -12,6 +12,7 @@ import os
 import logging
 import shutil
 import uuid
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
@@ -45,9 +46,17 @@ JWT_EXPIRATION_HOURS = 24 * 7  # 7 days
 # /auth/forgot-password for exactly where this is used.
 DEV_EXPOSE_RESET_CODES = os.environ.get('DEV_EXPOSE_RESET_CODES', 'false').lower() == 'true'
 
-# Image upload directory
+# Image upload directory (local storage)
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Storage backend configuration
+STORAGE_BACKEND = os.environ.get('STORAGE_BACKEND', 'local')  # 'local' or 's3'
+S3_BUCKET = os.environ.get('S3_BUCKET', '')
+S3_REGION = os.environ.get('S3_REGION', 'us-east-1')
+S3_ENDPOINT = os.environ.get('S3_ENDPOINT', '')  # For S3-compatible services (e.g. Backblaze B2)
+S3_ACCESS_KEY = os.environ.get('S3_ACCESS_KEY', '')
+S3_SECRET_KEY = os.environ.get('S3_SECRET_KEY', '')
 
 # Create the main app
 app = FastAPI(title="AutoNexus API", version="1.0.0")
@@ -80,8 +89,9 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
 
-# Serve uploaded images as static files
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+# Serve uploaded images as static files (only for local storage)
+if STORAGE_BACKEND == 'local':
+    app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 # ============== MODELS ==============
 
@@ -132,6 +142,10 @@ class Seller(BaseModel):
     phone: str
     whatsapp: str
     rating: float = 0.0
+    # Running sum of all individual rating values (1-5 each). Maintained via
+    # atomic $inc alongside rating_count so the average can be recomputed
+    # without a read-then-write race — see rate_seller().
+    rating_sum: int = 0
     rating_count: int = 0
     sales_count: int = 0
     verified: bool = False
@@ -141,6 +155,10 @@ class Seller(BaseModel):
     last_active: Optional[str] = None
     image: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    approved_by: Optional[str] = None  # admin user id who approved this seller
+    approved_at: Optional[datetime] = None  # timestamp when approved
+    rejected_by: Optional[str] = None  # admin user id who rejected this seller
+    rejected_at: Optional[datetime] = None  # timestamp when rejected
 
 class SparePart(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -193,6 +211,18 @@ class Rating(BaseModel):
 class RatingCreate(BaseModel):
     rating: int
     comment: Optional[str] = None
+
+class AdminAction(BaseModel):
+    """Audit trail entry for admin actions (approve/reject sellers, etc)."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    admin_id: str  # user id of the admin who performed the action
+    admin_name: Optional[str] = None  # user name for readability
+    action_type: str  # "approve_seller" | "reject_seller"
+    target_seller_id: str  # id of the seller affected by this action
+    target_seller_name: Optional[str] = None  # seller name for readability
+    reason: Optional[str] = None  # optional reason/notes for the action
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class SellerCreate(BaseModel):
     name: str
@@ -758,6 +788,71 @@ async def remove_favorite(part_id: str, user: dict = Depends(get_current_user)):
     await db.users.update_one({"id": user["id"]}, {"$pull": {"favorites": part_id}})
     return {"status": "removed", "part_id": part_id}
 
+# ============== STORAGE BACKEND (ABSTRACTION) ==============
+
+from abc import ABC, abstractmethod
+
+class StorageBackend(ABC):
+    """Abstract base for image storage (local filesystem or S3-compatible)."""
+
+    @abstractmethod
+    async def store(self, filename: str, contents: bytes) -> str:
+        """Store file and return the URL path that should be served to the client."""
+        pass
+
+class LocalStorage(StorageBackend):
+    """Store images in local filesystem (suitable for dev and single-machine deployments)."""
+
+    def __init__(self, upload_dir: Path):
+        self.upload_dir = upload_dir
+
+    async def store(self, filename: str, contents: bytes) -> str:
+        filepath = (self.upload_dir / filename).resolve()
+        if not filepath.is_relative_to(self.upload_dir.resolve()):
+            raise ValueError("Invalid upload path")
+        with open(filepath, "wb") as f:
+            f.write(contents)
+        return f"/uploads/{filename}"
+
+class S3Storage(StorageBackend):
+    """Store images in S3-compatible storage (AWS S3, Backblaze B2, Cloudflare R2, etc)."""
+
+    def __init__(self, bucket: str, region: str, endpoint: str, access_key: str, secret_key: str):
+        import boto3
+        self.bucket = bucket
+        config = {}
+        if endpoint:
+            config['endpoint_url'] = endpoint
+        self.s3_client = boto3.client(
+            's3',
+            region_name=region,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            **config
+        )
+
+    async def store(self, filename: str, contents: bytes) -> str:
+        # Run the S3 upload in a thread pool to avoid blocking the async event loop
+        loop = asyncio.get_event_loop()
+        def _upload():
+            self.s3_client.put_object(Bucket=self.bucket, Key=filename, Body=contents)
+        await loop.run_in_executor(None, _upload)
+        return f"/{self.bucket}/{filename}"
+
+# Initialize the configured storage backend
+def _init_storage() -> StorageBackend:
+    if STORAGE_BACKEND == 's3':
+        if not all([S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY]):
+            raise RuntimeError("S3 storage selected but missing S3_BUCKET, S3_ACCESS_KEY, or S3_SECRET_KEY")
+        logger.info(f"Initializing S3 storage backend (bucket={S3_BUCKET}, endpoint={S3_ENDPOINT or 'default'})")
+        return S3Storage(S3_BUCKET, S3_REGION, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY)
+    else:
+        logger.info(f"Initializing local filesystem storage backend (dir={UPLOAD_DIR})")
+        return LocalStorage(UPLOAD_DIR)
+
+# Create the storage backend instance at module load time
+storage_backend = None
+
 # ============== IMAGE UPLOAD ==============
 
 UPLOAD_MAX_BYTES = 5 * 1024 * 1024
@@ -789,6 +884,10 @@ def _sniff_image_signature(header: bytes, content_type: str) -> bool:
 @api_router.post("/upload/image")
 async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Upload a part image. Returns the URL path."""
+    global storage_backend
+    if storage_backend is None:
+        storage_backend = _init_storage()
+
     if file.content_type not in UPLOAD_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed")
 
@@ -811,16 +910,14 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
 
     ext = UPLOAD_CONTENT_TYPES[file.content_type]
     filename = f"{uuid.uuid4()}.{ext}"
-    filepath = (UPLOAD_DIR / filename).resolve()
-    if not filepath.is_relative_to(UPLOAD_DIR.resolve()):
-        # Should be unreachable given `ext` is one of three hardcoded values
-        # above -- kept as a last-line-of-defense assertion, not a real gate.
-        raise HTTPException(status_code=400, detail="Invalid upload path")
 
-    with open(filepath, "wb") as f:
-        f.write(contents)
+    try:
+        url = await storage_backend.store(filename, contents)
+    except Exception as e:
+        logger.error(f"Failed to store image {filename}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload image")
 
-    return {"url": f"/uploads/{filename}", "filename": filename}
+    return {"url": url, "filename": filename}
 
 # ============== SPARE PARTS ROUTES ==============
 
@@ -1090,21 +1187,36 @@ async def accept_request_quote(request_id: str, seller_id: str, user: dict = Dep
         raise HTTPException(status_code=404, detail="Request not found")
     if request["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="This isn't your request")
-    if request["status"] == "fulfilled":
-        raise HTTPException(status_code=400, detail="This request has already been fulfilled")
 
     matching = next((r for r in request.get("responses", []) if r["seller_id"] == seller_id), None)
     if not matching:
         raise HTTPException(status_code=404, detail="That seller hasn't responded to this request")
 
-    await db.requests.update_one(
-        {"id": request_id},
+    # Atomically transition the request to fulfilled ONLY if it isn't already
+    # fulfilled. The previous version checked request["status"] from the
+    # find_one above and then wrote the transition in a separate update_one --
+    # two near-simultaneous accept calls (double-click, a retried request, or
+    # two different sellers' quotes both being accepted) could both pass that
+    # read-based check before either write landed, so both proceeded to
+    # increment sales_count even though only one seller can legitimately be
+    # the accepted one. Folding the "not yet fulfilled" check into the
+    # update's filter makes MongoDB serialize this at the document level:
+    # only the first caller's update actually matches and modifies the
+    # document; every later caller's update matches zero documents and is
+    # rejected below instead of racing in application code.
+    result = await db.requests.update_one(
+        {"id": request_id, "status": {"$ne": "fulfilled"}},
         {"$set": {
             "status": "fulfilled",
             "accepted_seller_id": seller_id,
             "accepted_price": matching["price"]
         }}
     )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=400, detail="This request has already been fulfilled")
+
+    # Only the caller whose update above actually won the race reaches here,
+    # so sales_count is never incremented speculatively.
     await db.sellers.update_one({"id": seller_id}, {"$inc": {"sales_count": 1}})
     await touch_seller_activity(seller_id)
 
@@ -1144,17 +1256,27 @@ async def rate_seller(seller_id: str, data: RatingCreate, user: dict = Depends(g
 
     await db.requests.update_one({"id": fulfilled_request["id"]}, {"$set": {"rated": True}})
 
-    # Recompute the seller's live average rating from ALL their ratings — this
-    # is what replaces the old manually-edited number.
-    seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
-    prior_count = seller.get("rating_count", 0) if seller else 0
-    prior_rating = seller.get("rating", 0) if seller else 0
-    new_count = prior_count + 1
-    new_avg = ((prior_rating * prior_count) + data.rating) / new_count
-
+    # Atomically fold this rating into the seller's running totals and
+    # recompute the average — all in a single document-level pipeline update.
+    # A prior read-then-write version of this (read rating/rating_count,
+    # compute new average in Python, write it back) lost updates whenever two
+    # ratings for the same seller landed concurrently: both reads would see
+    # the same prior state and the second write would clobber the first's
+    # contribution. MongoDB applies a pipeline update to one document as a
+    # single atomic operation, so concurrent calls are serialized by the
+    # server instead of racing in application code.
+    # $ifNull guards sellers written before `rating_sum` existed.
     await db.sellers.update_one(
         {"id": seller_id},
-        {"$set": {"rating": round(new_avg, 2), "rating_count": new_count}}
+        [
+            {"$set": {
+                "rating_sum": {"$add": [{"$ifNull": ["$rating_sum", 0]}, data.rating]},
+                "rating_count": {"$add": [{"$ifNull": ["$rating_count", 0]}, 1]},
+            }},
+            {"$set": {
+                "rating": {"$round": [{"$divide": ["$rating_sum", "$rating_count"]}, 2]},
+            }},
+        ]
     )
 
     return {k: v for k, v in rating_dict.items() if k != '_id'}
@@ -1415,11 +1537,30 @@ async def admin_approve_seller(seller_id: str, admin: dict = Depends(get_current
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
 
-    await db.sellers.update_one({"id": seller_id}, {"$set": {"status": "approved"}})
+    now = datetime.now(timezone.utc)
+    await db.sellers.update_one(
+        {"id": seller_id},
+        {"$set": {"status": "approved", "approved_by": admin["id"], "approved_at": now.isoformat()}}
+    )
     await db.users.update_many(
         {"seller_id": seller_id},
         {"$set": {"role": "seller"}}
     )
+
+    # Record audit trail
+    action = AdminAction(
+        admin_id=admin["id"],
+        admin_name=admin.get("name"),
+        action_type="approve_seller",
+        target_seller_id=seller_id,
+        target_seller_name=seller.get("name"),
+    )
+    action_dict = action.model_dump()
+    action_dict["created_at"] = action_dict["created_at"].isoformat()
+    await db.admin_actions.insert_one(action_dict)
+
+    logger.info(f"Seller {seller_id} ({seller.get('name')}) approved by admin {admin['id']} ({admin.get('name')})")
+
     return await db.sellers.find_one({"id": seller_id}, {"_id": 0})
 
 @api_router.post("/admin/sellers/{seller_id}/reject")
@@ -1429,7 +1570,26 @@ async def admin_reject_seller(seller_id: str, admin: dict = Depends(get_current_
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
 
-    await db.sellers.update_one({"id": seller_id}, {"$set": {"status": "rejected", "active": False}})
+    now = datetime.now(timezone.utc)
+    await db.sellers.update_one(
+        {"id": seller_id},
+        {"$set": {"status": "rejected", "active": False, "rejected_by": admin["id"], "rejected_at": now.isoformat()}}
+    )
+
+    # Record audit trail
+    action = AdminAction(
+        admin_id=admin["id"],
+        admin_name=admin.get("name"),
+        action_type="reject_seller",
+        target_seller_id=seller_id,
+        target_seller_name=seller.get("name"),
+    )
+    action_dict = action.model_dump()
+    action_dict["created_at"] = action_dict["created_at"].isoformat()
+    await db.admin_actions.insert_one(action_dict)
+
+    logger.info(f"Seller {seller_id} ({seller.get('name')}) rejected by admin {admin['id']} ({admin.get('name')})")
+
     return await db.sellers.find_one({"id": seller_id}, {"_id": 0})
 
 @api_router.put("/admin/sellers/{seller_id}")
@@ -1617,7 +1777,21 @@ async def root():
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Minimal, unauthenticated liveness check for an uptime monitor.
+    Confirms both the API process AND the database connection are alive --
+    the previous version only ever returned a static "healthy", which would
+    have reported healthy even with MongoDB completely unreachable. Returns
+    503 (not 200) on DB failure so a monitor can actually tell "up" apart
+    from "up but broken"."""
+    try:
+        await db.command("ping")
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Health check failed: database ping error: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "database": "disconnected"}
+        )
 
 # ============== LIGHTWEIGHT ANALYTICS ==============
 # Simple event logging so there is real usage data (searches, WhatsApp contact
@@ -1662,6 +1836,20 @@ async def create_indexes():
     await db.users.update_many({"phone": None}, {"$unset": {"phone": ""}})
     await db.users.update_many({"email": None}, {"$unset": {"email": ""}})
 
+    # Backfill rating_sum for sellers rated before this field existed, so the
+    # atomic $inc-based average in rate_seller() has a correct running total
+    # to build on. Reconstructed as round(rating * rating_count) since that's
+    # the best reconstruction available from the previously-stored rounded
+    # average; from this point forward rating_sum is tracked exactly via
+    # atomic increments and never recomputed from `rating` again. Idempotent:
+    # only touches documents missing rating_sum.
+    await db.sellers.update_many(
+        {"rating_sum": {"$exists": False}},
+        [{"$set": {"rating_sum": {"$round": [{"$multiply": [
+            {"$ifNull": ["$rating", 0]}, {"$ifNull": ["$rating_count", 0]}
+        ]}, 0]}}}]
+    )
+
     await db.users.create_index("id", unique=True)
     await db.users.create_index("phone", unique=True, sparse=True)
     await db.users.create_index("email", unique=True, sparse=True)
@@ -1678,6 +1866,10 @@ async def create_indexes():
     await db.requests.create_index("id", unique=True)
     await db.requests.create_index("user_id")
     await db.requests.create_index([("status", 1), ("created_at", -1)])
+    await db.admin_actions.create_index("id", unique=True)
+    await db.admin_actions.create_index("admin_id")
+    await db.admin_actions.create_index("target_seller_id")
+    await db.admin_actions.create_index([("created_at", -1)])
     logger.info("MongoDB indexes created")
 
 @app.on_event("shutdown")

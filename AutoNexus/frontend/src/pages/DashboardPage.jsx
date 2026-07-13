@@ -341,7 +341,7 @@ const DashboardPage = () => {
                 <Store size={18} className="mr-2" />Register as Seller
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Register Your Shop</DialogTitle></DialogHeader>
               <form onSubmit={handleRegisterSeller} className="space-y-4">
                 <div><Label>Shop Name *</Label>

@@ -64,6 +64,11 @@ chainlit.md
 # Data and databases
 agenthub/agents/youtube/db
 
+# User-uploaded content (runtime data, not source — backed up separately via
+# the cron job documented in MIGRATION_UPLOADS.md, not via git)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 # Archive files and large assets
 **/*.zip
 **/*.tar.gz
