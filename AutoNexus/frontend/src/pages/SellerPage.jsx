@@ -2,6 +2,7 @@ import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   MessageCircle,
@@ -18,22 +19,28 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import ProductCard from "../components/ProductCard";
 
-const formatLastActive = (iso) => {
+// Returns a translation key + interpolation value instead of a hardcoded
+// English string, so the caller can localize via
+// t(`seller_profile.${key}`, { count }) -- mirrors the getPasswordStrength
+// pattern used on ResetPasswordPage. `lang` picks the locale for the 30+
+// day fallback date format (e.g. "12 mars" in French vs "Mar 12" in English).
+const getLastActiveInfo = (iso, lang) => {
   const then = new Date(iso);
   const diffMs = Date.now() - then.getTime();
   const mins = Math.floor(diffMs / 60000);
-  if (mins < 5) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 5) return { key: "active_just_now", count: null };
+  if (mins < 60) return { key: "active_minutes_ago", count: mins };
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return { key: "active_hours_ago", count: hours };
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (days < 30) return { key: "active_days_ago", count: days };
+  return { key: null, formattedDate: then.toLocaleDateString(lang === "fr" ? "fr-FR" : "en-US", { month: 'short', day: 'numeric' }) };
 };
 
 
 const SellerPage = () => {
   const { id } = useParams();
+  const { t, i18n } = useTranslation();
   const [seller, setSeller] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -69,9 +76,9 @@ const SellerPage = () => {
   if (!seller) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-12 text-center">
-        <p className="text-gray-500">Seller not found</p>
+        <p className="text-gray-500">{t("seller_profile.seller_not_found")}</p>
         <Link to="/sellers">
-          <Button className="mt-4">Back to Sellers</Button>
+          <Button className="mt-4">{t("seller_profile.back_to_sellers")}</Button>
         </Link>
       </div>
     );
@@ -79,7 +86,7 @@ const SellerPage = () => {
 
   // WhatsApp link
   const whatsappMessage = encodeURIComponent(
-    `Hello ${seller.name},\n\nI found your shop on AutoNexus. I would like to inquire about spare parts.`
+    t("whatsapp.seller_inquiry", { name: seller.name })
   );
   const whatsappLink = `https://wa.me/${seller.whatsapp?.replace('+', '')}?text=${whatsappMessage}`;
 
@@ -103,7 +110,7 @@ const SellerPage = () => {
       <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
         <Link to="/sellers" className="hover:text-[#1a5c38] flex items-center gap-1">
           <ArrowLeft size={16} />
-          All Sellers
+          {t("seller_profile.all_sellers_link")}
         </Link>
         <ChevronRight size={14} />
         <span className="text-gray-900 truncate">{seller.name}</span>
@@ -132,7 +139,7 @@ const SellerPage = () => {
               {seller.verified && (
                 <Badge className="bg-[#1a5c38]">
                   <CheckCircle size={12} className="mr-1" />
-                  Verified
+                  {t("seller_profile.verified_badge")}
                 </Badge>
               )}
             </div>
@@ -147,20 +154,25 @@ const SellerPage = () => {
                     <span className="text-gray-400">({seller.rating_count})</span>
                   </>
                 ) : (
-                  <span className="text-gray-400">No ratings yet</span>
+                  <span className="text-gray-400">{t("seller_profile.no_ratings_yet")}</span>
                 )}
               </div>
               <div className="flex items-center gap-1">
                 <Package size={16} className="text-gray-400" />
                 <span className="font-medium">{seller.sales_count}</span>
-                <span className="text-gray-400">sales</span>
+                <span className="text-gray-400">{t("common.sales_suffix")}</span>
               </div>
-              {seller.last_active && (
-                <div className="flex items-center gap-1">
-                  <Clock size={16} className="text-gray-400" />
-                  <span className="text-gray-400">Active {formatLastActive(seller.last_active)}</span>
-                </div>
-              )}
+              {seller.last_active && (() => {
+                const info = getLastActiveInfo(seller.last_active, i18n.language);
+                return (
+                  <div className="flex items-center gap-1">
+                    <Clock size={16} className="text-gray-400" />
+                    <span className="text-gray-400">
+                      {info.key ? t(`seller_profile.${info.key}`, { count: info.count }) : info.formattedDate}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Location */}
@@ -179,7 +191,7 @@ const SellerPage = () => {
               <a href={whatsappLink} target="_blank" rel="noopener noreferrer" data-testid="seller-whatsapp-btn">
                 <Button className="w-full sm:w-auto bg-[#25D366] hover:bg-[#128C7E] text-white">
                   <MessageCircle size={18} className="mr-2" />
-                  Contact on WhatsApp
+                  {t("product.contact_whatsapp")}
                 </Button>
               </a>
               <a href={`tel:${seller.phone}`} data-testid="seller-call-btn">
@@ -196,20 +208,20 @@ const SellerPage = () => {
       {/* Seller's Parts */}
       <section data-testid="seller-parts-section">
         <div className="flex items-center justify-between mb-6">
-          <h2 
+          <h2
             className="text-xl md:text-2xl font-bold text-gray-900"
             style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
           >
-            Products by {seller.name}
+            {t("seller_profile.products_by", { name: seller.name })}
           </h2>
           <Badge variant="secondary" className="text-gray-600">
-            {partsWithSeller.length} parts
+            {t("common.parts_count", { count: partsWithSeller.length })}
           </Badge>
         </div>
 
         {partsWithSeller.length === 0 ? (
           <div className="text-center py-12 bg-gray-50 rounded-xl">
-            <p className="text-gray-500">No parts listed yet</p>
+            <p className="text-gray-500">{t("seller_profile.no_parts_listed")}</p>
           </div>
         ) : (
           <div className="parts-grid">
@@ -227,7 +239,7 @@ const SellerPage = () => {
             className="text-xl md:text-2xl font-bold text-gray-900 mb-6"
             style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
           >
-            Buyer Reviews
+            {t("seller_profile.buyer_reviews_title")}
           </h2>
           <div className="space-y-4">
             {reviews.map((rev) => (
@@ -239,7 +251,7 @@ const SellerPage = () => {
                         className={s <= rev.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"} />
                     ))}
                   </div>
-                  <span className="text-sm font-medium text-gray-700">{rev.user_name || "Buyer"}</span>
+                  <span className="text-sm font-medium text-gray-700">{rev.user_name || t("seller_profile.buyer_default_name")}</span>
                 </div>
                 {rev.comment && <p className="text-sm text-gray-600">{rev.comment}</p>}
               </div>

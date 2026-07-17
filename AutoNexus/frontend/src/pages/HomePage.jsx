@@ -2,12 +2,13 @@ import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
-import { 
-  Search, 
-  ShieldCheck, 
-  Truck, 
-  TrendingUp, 
-  ChevronRight, 
+import { useTranslation } from "react-i18next";
+import {
+  Search,
+  ShieldCheck,
+  Truck,
+  TrendingUp,
+  ChevronRight,
   Loader2,
   MessageCircle,
   Star,
@@ -43,6 +44,7 @@ const PART_IMAGES = {
 };
 
 const HomePage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBrand, setSelectedBrand] = useState("");
@@ -85,56 +87,60 @@ const HomePage = () => {
   const features = [
     {
       icon: ShieldCheck,
-      title: "Verified Parts Network",
-      description: "All sellers are verified for quality and authenticity",
+      title: t("home.feature_verified_title"),
+      description: t("home.feature_verified_desc"),
       color: "bg-emerald-500"
     },
     {
       icon: Search,
-      title: "Search Spare Parts",
-      description: "Find parts for Japanese & Korean vehicles instantly",
+      title: t("home.feature_search_title"),
+      description: t("home.feature_search_desc"),
       color: "bg-blue-500"
     },
     {
       icon: TrendingUp,
-      title: "Compare Prices",
-      description: "Get the best deals from multiple trusted sellers",
+      title: t("home.feature_compare_title"),
+      description: t("home.feature_compare_desc"),
       color: "bg-amber-500"
     },
     {
       icon: Truck,
-      title: "Fast Delivery",
-      description: "Quick delivery within Douala and surrounding areas",
+      title: t("home.feature_delivery_title"),
+      description: t("home.feature_delivery_desc"),
       color: "bg-purple-500"
     }
   ];
 
+  // `slug` stays the fixed English category value used to filter results
+  // (must match the backend's /filters/categories values exactly) --
+  // `name` is the translated label shown to the user. Only `name` changes
+  // with language; the search link below is built from `slug`.
   const categories = [
-    { name: "Brake Pads", icon: "🔴", count: 45 },
-    { name: "Filters", icon: "🔧", count: 78 },
-    { name: "Suspension", icon: "⚙️", count: 32 },
-    { name: "Engine Parts", icon: "🔩", count: 56 },
-    { name: "Electrical", icon: "⚡", count: 41 },
-    { name: "Body Parts", icon: "🚗", count: 29 }
+    { slug: "Brake Pads", name: t("home.category_brake_pads"), icon: "🔴", count: 45 },
+    { slug: "Filters", name: t("home.category_filters"), icon: "🔧", count: 78 },
+    { slug: "Suspension", name: t("home.category_suspension"), icon: "⚙️", count: 32 },
+    { slug: "Engine Parts", name: t("home.category_engine_parts"), icon: "🔩", count: 56 },
+    { slug: "Electrical", name: t("home.category_electrical"), icon: "⚡", count: 41 },
+    { slug: "Body Parts", name: t("home.category_body_parts"), icon: "🚗", count: 29 }
   ];
 
   const howItWorks = [
     {
       step: 1,
-      title: "Search for a Part",
-      description: "Enter the part name, select your vehicle brand, model, and year to find compatible parts.",
+      title: t("home.step1_title"),
+      description: t("home.step1_desc"),
       icon: Search
     },
     {
       step: 2,
-      title: "Compare Prices",
-      description: "View prices from multiple verified sellers and choose the best deal for your budget.",
+      title: t("home.step2_title"),
+      description: t("home.step2_desc"),
       icon: TrendingUp
     },
     {
       step: 3,
-      title: "Contact on WhatsApp",
-      description: "Instantly connect with the seller on WhatsApp to confirm availability and arrange pickup or delivery.",
+      title: t("home.step3_title"),
+      description: t("home.step3_desc"),
       icon: MessageCircle
     }
   ];
@@ -159,23 +165,22 @@ const HomePage = () => {
                 <img src={LOGO_URL} alt="AutoNexus" className="h-8 w-auto" />
               </div>
 
-              <h1 
+              <h1
                 className="text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight mb-6"
                 style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
                 data-testid="hero-title"
               >
-                Digital Automotive
-                <span className="block text-[#1a5c38]">Spare Parts Marketplace</span>
+                {t("home.hero_title_line1")}
+                <span className="block text-[#1a5c38]">{t("home.hero_title_line2")}</span>
               </h1>
-              
+
               <p className="text-lg md:text-xl text-gray-600 mb-8 max-w-xl mx-auto lg:mx-0">
-                Find spare parts fast in <strong>Camp Yabassi, Cameroon</strong>. 
-                Compare prices from verified sellers and contact them instantly on WhatsApp.
+                {t("home.hero_subtitle")}
               </p>
 
               {/* Search Form */}
-              <form 
-                onSubmit={handleSearch} 
+              <form
+                onSubmit={handleSearch}
                 className="bg-white rounded-2xl p-4 md:p-6 shadow-xl border border-gray-100"
                 data-testid="search-form"
               >
@@ -184,7 +189,7 @@ const HomePage = () => {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                     <Input
                       type="text"
-                      placeholder="Search parts (brake pads, starter motor...)"
+                      placeholder={t("home.hero_search_placeholder")}
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="h-14 pl-12 text-gray-900 border-gray-200 rounded-xl text-lg"
@@ -193,10 +198,10 @@ const HomePage = () => {
                   </div>
                   <Select value={selectedBrand} onValueChange={setSelectedBrand}>
                     <SelectTrigger className="w-full md:w-48 h-14 text-gray-900 border-gray-200 rounded-xl" data-testid="brand-select">
-                      <SelectValue placeholder="Select Brand" />
+                      <SelectValue placeholder={t("home.hero_select_brand_placeholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Brands</SelectItem>
+                      <SelectItem value="all">{t("home.hero_all_brands")}</SelectItem>
                       {brands.map((brand) => (
                         <SelectItem key={brand} value={brand}>
                           {brand}
@@ -204,27 +209,32 @@ const HomePage = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button 
-                    type="submit" 
+                  <Button
+                    type="submit"
                     className="h-14 px-8 bg-[#1a5c38] hover:bg-[#144a2d] rounded-xl text-lg font-semibold"
                     data-testid="search-btn"
                   >
                     <Search size={20} className="mr-2" />
-                    Search
+                    {t("home.hero_search_btn")}
                   </Button>
                 </div>
 
                 {/* Quick Search Tags */}
                 <div className="flex flex-wrap gap-2 mt-4">
-                  <span className="text-sm text-gray-500">Popular:</span>
-                  {["Brake Pads", "Oil Filter", "Starter Motor", "Battery"].map((tag) => (
+                  <span className="text-sm text-gray-500">{t("home.hero_popular_label")}</span>
+                  {[
+                    { key: "tag_brake_pads", value: t("home.tag_brake_pads") },
+                    { key: "tag_oil_filter", value: t("home.tag_oil_filter") },
+                    { key: "tag_starter_motor", value: t("home.tag_starter_motor") },
+                    { key: "tag_battery", value: t("home.tag_battery") },
+                  ].map((tag) => (
                     <button
-                      key={tag}
+                      key={tag.key}
                       type="button"
-                      onClick={() => { setSearchQuery(tag); }}
+                      onClick={() => { setSearchQuery(tag.value); }}
                       className="text-sm px-3 py-1 bg-gray-100 hover:bg-[#1a5c38]/10 hover:text-[#1a5c38] rounded-full text-gray-600 transition-colors"
                     >
-                      {tag}
+                      {tag.value}
                     </button>
                   ))}
                 </div>
@@ -234,15 +244,15 @@ const HomePage = () => {
               <div className="flex justify-center lg:justify-start gap-8 mt-8">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-[#1a5c38]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>500+</p>
-                  <p className="text-sm text-gray-500">Parts Listed</p>
+                  <p className="text-sm text-gray-500">{t("home.stat_parts_listed")}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-3xl font-bold text-[#1a5c38]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>50+</p>
-                  <p className="text-sm text-gray-500">Verified Sellers</p>
+                  <p className="text-sm text-gray-500">{t("home.stat_verified_sellers")}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-3xl font-bold text-[#1a5c38]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>8</p>
-                  <p className="text-sm text-gray-500">Vehicle Brands</p>
+                  <p className="text-sm text-gray-500">{t("home.stat_vehicle_brands")}</p>
                 </div>
               </div>
             </div>
@@ -267,7 +277,7 @@ const HomePage = () => {
                     <p className="text-xs text-gray-500 mb-2">K90666 • Kia Sportage 2011-2015</p>
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-[#1a5c38]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>15,000 FCFA</span>
-                      <Badge className="bg-green-100 text-green-800 text-xs">In Stock</Badge>
+                      <Badge className="bg-green-100 text-green-800 text-xs">{t("common.stock_in")}</Badge>
                     </div>
                   </div>
 
@@ -300,14 +310,14 @@ const HomePage = () => {
                     </div>
                     <Button size="sm" className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white text-xs">
                       <MessageCircle size={14} className="mr-1" />
-                      Contact on WhatsApp
+                      {t("product.contact_whatsapp")}
                     </Button>
                   </div>
 
                   {/* Price Comparison Badge */}
                   <div className="absolute top-60 -left-8 bg-[#1a5c38] text-white rounded-lg px-4 py-2 shadow-lg">
-                    <p className="text-xs font-medium">Compare from 3 sellers</p>
-                    <p className="text-sm font-bold">Save up to 15%</p>
+                    <p className="text-xs font-medium">{t("home.mockup_compare_sellers")}</p>
+                    <p className="text-sm font-bold">{t("home.mockup_save_up_to")}</p>
                   </div>
                 </div>
               </div>
@@ -320,7 +330,7 @@ const HomePage = () => {
       <section className="bg-[#1a5c38] py-6">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-center gap-8 md:gap-16 flex-wrap">
-            <p className="text-white/80 text-sm font-medium">Supported Brands:</p>
+            <p className="text-white/80 text-sm font-medium">{t("home.supported_brands_label")}</p>
             {["Toyota", "Nissan", "Hyundai", "Kia", "Mitsubishi", "Suzuki", "Mazda", "Daewoo"].map((brand) => (
               <span key={brand} className="text-white font-semibold text-lg" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
                 {brand}
@@ -335,14 +345,14 @@ const HomePage = () => {
       <section className="py-16 md:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 
+            <h2
               className="text-3xl md:text-4xl font-bold text-gray-900 mb-4"
               style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
             >
-              Why Choose AutoNexus?
+              {t("home.why_choose_title")}
             </h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              The easiest way to find spare parts in Camp Yabassi without walking around the market.
+              {t("home.why_choose_subtitle")}
             </p>
           </div>
 
@@ -376,20 +386,20 @@ const HomePage = () => {
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h2 
+              <h2
                 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2"
                 style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
               >
-                Featured Spare Parts
+                {t("home.featured_parts_title")}
               </h2>
-              <p className="text-gray-600">Quality parts from verified sellers at competitive prices</p>
+              <p className="text-gray-600">{t("home.featured_parts_subtitle")}</p>
             </div>
-            <Link 
-              to="/search" 
+            <Link
+              to="/search"
               className="hidden md:flex items-center gap-1 text-[#1a5c38] font-semibold hover:underline"
               data-testid="view-all-parts-link"
             >
-              View All Parts
+              {t("home.view_all_parts")}
               <ChevronRight size={18} />
             </Link>
           </div>
@@ -409,7 +419,7 @@ const HomePage = () => {
           <div className="text-center mt-8 md:hidden">
             <Link to="/search">
               <Button className="bg-[#1a5c38] hover:bg-[#144a2d]">
-                View All Parts
+                {t("home.view_all_parts")}
                 <ChevronRight size={18} className="ml-1" />
               </Button>
             </Link>
@@ -421,14 +431,14 @@ const HomePage = () => {
       <section className="py-16 md:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 
+            <h2
               className="text-3xl md:text-4xl font-bold text-gray-900 mb-4"
               style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
             >
-              Verified Sellers in Camp Yabassi
+              {t("home.verified_sellers_title")}
             </h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              Connect with trusted spare parts dealers who have been verified for quality and reliability.
+              {t("home.verified_sellers_subtitle")}
             </p>
           </div>
 
@@ -441,7 +451,7 @@ const HomePage = () => {
           <div className="text-center mt-8">
             <Link to="/sellers">
               <Button variant="outline" className="border-[#1a5c38] text-[#1a5c38] hover:bg-[#1a5c38] hover:text-white">
-                View All Sellers
+                {t("home.view_all_sellers")}
                 <ChevronRight size={18} className="ml-1" />
               </Button>
             </Link>
@@ -453,14 +463,14 @@ const HomePage = () => {
       <section className="py-16 md:py-24 bg-gradient-to-br from-[#1a5c38] to-[#0f3922] text-white">
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 
+            <h2
               className="text-3xl md:text-4xl font-bold mb-4"
               style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
             >
-              How It Works
+              {t("home.how_it_works_title")}
             </h2>
             <p className="text-white/80 max-w-2xl mx-auto">
-              Find and buy spare parts in 3 simple steps
+              {t("home.how_it_works_subtitle")}
             </p>
           </div>
 
@@ -492,20 +502,20 @@ const HomePage = () => {
       <section className="py-16 md:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 
+            <h2
               className="text-3xl md:text-4xl font-bold text-gray-900 mb-4"
               style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
             >
-              Browse by Category
+              {t("home.browse_category_title")}
             </h2>
-            <p className="text-gray-600">Find parts by category for easier navigation</p>
+            <p className="text-gray-600">{t("home.browse_category_subtitle")}</p>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {categories.map((category) => (
               <Link
-                key={category.name}
-                to={`/search?category=${encodeURIComponent(category.name.replace(" ", "+"))}`}
+                key={category.slug}
+                to={`/search?category=${encodeURIComponent(category.slug.replace(" ", "+"))}`}
                 className="group bg-gray-50 hover:bg-[#1a5c38] rounded-2xl p-6 text-center transition-all duration-300 border border-gray-100 hover:border-[#1a5c38]"
               >
                 <span className="text-4xl mb-3 block">{category.icon}</span>
@@ -513,7 +523,7 @@ const HomePage = () => {
                   {category.name}
                 </h4>
                 <p className="text-sm text-gray-500 group-hover:text-white/70 transition-colors">
-                  {category.count} parts
+                  {t("common.parts_count", { count: category.count })}
                 </p>
               </Link>
             ))}
@@ -524,26 +534,26 @@ const HomePage = () => {
       {/* Final CTA */}
       <section className="py-16 bg-[#1a5c38]">
         <div className="max-w-4xl mx-auto px-4 text-center">
-          <h2 
+          <h2
             className="text-3xl md:text-4xl font-bold text-white mb-4"
             style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
           >
-            Ready to Find Your Parts?
+            {t("home.cta_title")}
           </h2>
           <p className="text-white/80 mb-8 max-w-xl mx-auto">
-            Join thousands of mechanics and car owners who save time and money finding spare parts on AutoNexus.
+            {t("home.cta_subtitle")}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link to="/search">
               <Button size="lg" className="bg-white text-[#1a5c38] hover:bg-gray-100">
                 <Search size={20} className="mr-2" />
-                Search Parts Now
+                {t("home.cta_search_btn")}
               </Button>
             </Link>
             <Link to="/login">
               <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
                 <Users size={20} className="mr-2" />
-                Become a Seller
+                {t("nav.become_a_seller")}
               </Button>
             </Link>
           </div>
@@ -556,7 +566,7 @@ const HomePage = () => {
           <div className="flex items-center justify-center gap-2 text-gray-600">
             <MapPin size={18} className="text-[#1a5c38]" />
             <p>
-              Serving car owners and mechanics in <strong className="text-gray-900">Camp Yabassi, Douala, Cameroon</strong>
+              {t("home.location_info")} <strong className="text-gray-900">Camp Yabassi, Douala, Cameroon</strong>
             </p>
           </div>
         </div>
@@ -586,19 +596,20 @@ const HomePage = () => {
 
 // Part Card Component
 const PartCard = ({ part }) => {
+  const { t } = useTranslation();
   // FIX: align stock status thresholds/labels with ProductPage (0 = Out of Stock)
   const stock = part.stock ?? 0;
   const stockStatus = stock === 0 ? "out" : stock <= 5 ? "low" : stock <= 20 ? "limited" : "in";
-  const stockLabel = stock === 0 ? "Out of Stock" : stock <= 5 ? "Low Stock" : stock <= 20 ? "Limited Stock" : "In Stock";
+  const stockLabel = stock === 0 ? t("common.stock_out") : stock <= 5 ? t("common.stock_low") : stock <= 20 ? t("common.stock_limited") : t("common.stock_in");
 
   const whatsappMessage = encodeURIComponent(
-    `Hello, I found this spare part on AutoNexus.\n\n` +
-    `Product: ${part.name}\n` +
-    `Part Number: ${part.part_number}\n` +
-    `Price: ${part.price?.toLocaleString()} FCFA\n\n` +
-    `Is this part still available?`
+    t("whatsapp.part_inquiry_no_vehicle", {
+      name: part.name,
+      partNumber: part.part_number,
+      price: part.price?.toLocaleString(),
+    })
   );
-  const whatsappLink = part.seller?.whatsapp 
+  const whatsappLink = part.seller?.whatsapp
     ? `https://wa.me/${part.seller.whatsapp.replace('+', '')}?text=${whatsappMessage}`
     : '#';
 
@@ -613,7 +624,7 @@ const PartCard = ({ part }) => {
             loading="lazy"
           />
           {part.condition === "used" && (
-            <Badge className="absolute top-3 left-3 bg-amber-500">Used</Badge>
+            <Badge className="absolute top-3 left-3 bg-amber-500">{t("common.condition_used")}</Badge>
           )}
         </div>
       </Link>
@@ -662,7 +673,7 @@ const PartCard = ({ part }) => {
         <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
           <Button className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white" size="sm">
             <MessageCircle size={16} className="mr-2" />
-            Contact Seller
+            {t("common.contact_seller_short")}
           </Button>
         </a>
       </div>
@@ -672,8 +683,9 @@ const PartCard = ({ part }) => {
 
 // Seller Card Component
 const SellerCard = ({ seller }) => {
+  const { t } = useTranslation();
   const whatsappMessage = encodeURIComponent(
-    `Hello ${seller.name},\n\nI found your shop on AutoNexus. I would like to inquire about spare parts.`
+    t("whatsapp.seller_inquiry", { name: seller.name })
   );
   const whatsappLink = `https://wa.me/${seller.whatsapp?.replace('+', '')}?text=${whatsappMessage}`;
 
@@ -696,7 +708,7 @@ const SellerCard = ({ seller }) => {
               <span>{seller.rating?.toFixed(1)}</span>
             </div>
             <span>•</span>
-            <span>{seller.sales_count} sales</span>
+            <span>{seller.sales_count} {t("common.sales_suffix")}</span>
           </div>
         </div>
       </div>
@@ -712,7 +724,7 @@ const SellerCard = ({ seller }) => {
 
       <div className="flex gap-2">
         <Link to={`/sellers/${seller.id}`} className="flex-1">
-          <Button variant="outline" className="w-full">View Shop</Button>
+          <Button variant="outline" className="w-full">{t("common.view_shop")}</Button>
         </Link>
         <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
           <Button className="bg-[#25D366] hover:bg-[#128C7E]">

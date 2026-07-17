@@ -2,10 +2,11 @@ import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import { 
-  Store, 
-  Star, 
-  CheckCircle, 
+import { useTranslation } from "react-i18next";
+import {
+  Store,
+  Star,
+  CheckCircle,
   MapPin,
   Loader2,
   MessageCircle,
@@ -18,6 +19,7 @@ import { Input } from "../components/ui/input";
 
 
 const SellersListPage = () => {
+  const { t } = useTranslation();
   const [sellers, setSellers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,21 +47,21 @@ const SellersListPage = () => {
     <div className="max-w-7xl mx-auto px-4 py-6" data-testid="sellers-list-page">
       {/* Header */}
       <div className="mb-8">
-        <h1 
+        <h1
           className="text-2xl md:text-3xl font-bold text-gray-900 mb-2"
           style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
         >
-          Verified Sellers
+          {t("sellers_list.title")}
         </h1>
         <p className="text-gray-500">
-          All spare parts sellers in Camp Yabassi, Douala
+          {t("sellers_list.subtitle")}
         </p>
       </div>
 
       {/* Search */}
       <div className="mb-6">
         <Input
-          placeholder="Search sellers by name or location..."
+          placeholder={t("sellers_list.search_placeholder")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-md"
@@ -74,13 +76,13 @@ const SellersListPage = () => {
       ) : filteredSellers.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-xl">
           <Store size={48} className="mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500">No sellers found</p>
+          <p className="text-gray-500">{t("sellers_list.no_sellers_found")}</p>
         </div>
       ) : (
         <div className="grid gap-4 md:gap-6" data-testid="sellers-grid">
           {filteredSellers.map((seller) => {
             const whatsappMessage = encodeURIComponent(
-              `Hello ${seller.name},\n\nI found your shop on AutoNexus. I would like to inquire about spare parts.`
+              t("whatsapp.seller_inquiry", { name: seller.name })
             );
             const whatsappLink = `https://wa.me/${seller.whatsapp?.replace('+', '')}?text=${whatsappMessage}`;
 
@@ -120,7 +122,7 @@ const SellersListPage = () => {
                       </div>
                       <div className="flex items-center gap-1">
                         <Package size={14} />
-                        <span>{seller.sales_count} sales</span>
+                        <span>{seller.sales_count} {t("common.sales_suffix")}</span>
                       </div>
                     </div>
 
@@ -140,13 +142,13 @@ const SellersListPage = () => {
                   <div className="flex flex-row md:flex-col gap-2 justify-center">
                     <Link to={`/sellers/${seller.id}`}>
                       <Button variant="outline" className="w-full">
-                        View Shop
+                        {t("common.view_shop")}
                       </Button>
                     </Link>
                     <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
                       <Button className="w-full bg-[#25D366] hover:bg-[#128C7E]">
                         <MessageCircle size={16} className="mr-1" />
-                        WhatsApp
+                        {t("common.whatsapp_short")}
                       </Button>
                     </a>
                   </div>

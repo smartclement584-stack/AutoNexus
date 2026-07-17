@@ -2,6 +2,7 @@ import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft, MessageCircle, Phone, Star, CheckCircle, MapPin,
   Tag, Loader2, ChevronRight, Heart
@@ -16,6 +17,7 @@ import { logEvent } from "../lib/analytics";
 
 const ProductPage = () => {
   const { id } = useParams();
+  const { t } = useTranslation();
   const { isAuthenticated, favorites, toggleFavorite } = useAuth();
   const [part, setPart] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -46,18 +48,18 @@ const ProductPage = () => {
   if (!part) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-12 text-center">
-        <p className="text-gray-500">Part not found</p>
-        <Link to="/search"><Button className="mt-4">Back to Search</Button></Link>
+        <p className="text-gray-500">{t("product.not_found")}</p>
+        <Link to="/search"><Button className="mt-4">{t("product.back_to_search")}</Button></Link>
       </div>
     );
   }
 
   // FIX: stock = 0 now correctly shows "Out of Stock"
   const getStockInfo = (stock) => {
-    if (stock === 0) return { status: "out", label: "Out of Stock", color: "bg-red-100 text-red-800" };
-    if (stock <= 5) return { status: "low", label: "Low Stock", color: "bg-orange-100 text-orange-800" };
-    if (stock <= 20) return { status: "limited", label: "Limited Stock", color: "bg-yellow-100 text-yellow-800" };
-    return { status: "in", label: "In Stock", color: "bg-green-100 text-green-800" };
+    if (stock === 0) return { status: "out", label: t("common.stock_out"), color: "bg-red-100 text-red-800" };
+    if (stock <= 5) return { status: "low", label: t("common.stock_low"), color: "bg-orange-100 text-orange-800" };
+    if (stock <= 20) return { status: "limited", label: t("common.stock_limited"), color: "bg-yellow-100 text-yellow-800" };
+    return { status: "in", label: t("common.stock_in"), color: "bg-green-100 text-green-800" };
   };
 
   const stockInfo = getStockInfo(part.stock);
@@ -70,12 +72,12 @@ const ProductPage = () => {
   const lowestPrice = Math.min(...allPrices.filter((p) => typeof p === "number"));
 
   const whatsappMessage = encodeURIComponent(
-    `Hello, I found this spare part on AutoNexus.\n\n` +
-    `Product: ${part.name}\n` +
-    `Part Number: ${part.part_number}\n` +
-    `Vehicle: ${part.brands?.join(", ")} ${part.models?.join(", ")} ${part.years?.[0]}-${part.years?.[part.years.length - 1]}\n` +
-    `Price: ${part.price?.toLocaleString()} FCFA\n\n` +
-    `Is this part still available?`
+    t("whatsapp.part_inquiry_with_vehicle", {
+      name: part.name,
+      partNumber: part.part_number,
+      vehicle: `${part.brands?.join(", ")} ${part.models?.join(", ")} ${part.years?.[0]}-${part.years?.[part.years.length - 1]}`,
+      price: part.price?.toLocaleString(),
+    })
   );
 
   const whatsappLink = part.seller?.whatsapp
@@ -87,7 +89,7 @@ const ProductPage = () => {
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
         <Link to="/search" className="hover:text-[#1a5c38] flex items-center gap-1">
-          <ArrowLeft size={16} />Back to Search
+          <ArrowLeft size={16} />{t("product.back_to_search")}
         </Link>
         <ChevronRight size={14} />
         <span className="text-gray-900 truncate">{part.name}</span>
@@ -125,7 +127,7 @@ const ProductPage = () => {
               style={{ fontFamily: 'Barlow Condensed, sans-serif' }} data-testid="product-title">
               {part.name}
             </h1>
-            {part.condition === "used" && <Badge className="bg-yellow-500">Used</Badge>}
+            {part.condition === "used" && <Badge className="bg-yellow-500">{t("common.condition_used")}</Badge>}
           </div>
 
           <div className="flex items-center gap-2 mb-4">
@@ -134,7 +136,7 @@ const ProductPage = () => {
           </div>
 
           <div className="bg-gray-50 rounded-xl p-4 mb-6">
-            <p className="text-sm text-gray-500 mb-1">Price</p>
+            <p className="text-sm text-gray-500 mb-1">{t("product.price_label")}</p>
             <div className="flex items-baseline gap-2">
               <span className="text-3xl md:text-4xl font-bold text-[#1a5c38]"
                 style={{ fontFamily: 'JetBrains Mono, monospace' }} data-testid="product-price">
@@ -143,25 +145,25 @@ const ProductPage = () => {
               <span className="text-lg text-gray-500">FCFA</span>
             </div>
             <Badge variant="secondary" className={`mt-2 ${stockInfo.color}`} data-testid="product-stock">
-              {stockInfo.label} ({part.stock} available)
+              {stockInfo.label} {t("product.available_count", { count: part.stock })}
             </Badge>
           </div>
 
           <div className="mb-6">
-            <h3 className="font-semibold text-gray-900 mb-2">Compatible Vehicles</h3>
+            <h3 className="font-semibold text-gray-900 mb-2">{t("product.compatible_vehicles")}</h3>
             <div className="bg-gray-50 rounded-lg p-4">
               <p className="text-gray-700">
                 <span className="font-medium">{part.brands?.join(", ")}</span>{" "}{part.models?.join(", ")}
               </p>
               <p className="text-gray-500 text-sm mt-1">
-                Years: {part.years?.[0]} - {part.years?.[part.years.length - 1]}
+                {t("product.years_label", { from: part.years?.[0], to: part.years?.[part.years.length - 1] })}
               </p>
             </div>
           </div>
 
           {part.description && (
             <div className="mb-6">
-              <h3 className="font-semibold text-gray-900 mb-2">Description</h3>
+              <h3 className="font-semibold text-gray-900 mb-2">{t("common.description_label")}</h3>
               <p className="text-gray-600">{part.description}</p>
             </div>
           )}
@@ -184,7 +186,7 @@ const ProductPage = () => {
                     <Star size={14} className="fill-yellow-400 text-yellow-400" />
                     <span>{part.seller.rating?.toFixed(1)}</span>
                     <span>•</span>
-                    <span>{part.seller.sales_count} sales</span>
+                    <span>{part.seller.sales_count} {t("common.sales_suffix")}</span>
                   </div>
                   <div className="flex items-center gap-1 text-sm text-gray-500 mt-1">
                     <MapPin size={14} />
@@ -205,13 +207,13 @@ const ProductPage = () => {
               onClick={() => logEvent("whatsapp_click", { part_id: part.id, seller_id: part.seller?.id })}
             >
               <Button className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white text-lg py-6" size="lg">
-                <MessageCircle size={22} className="mr-2" />Contact on WhatsApp
+                <MessageCircle size={22} className="mr-2" />{t("product.contact_whatsapp")}
               </Button>
             </a>
             {part.seller?.phone && (
               <a href={`tel:${part.seller.phone}`} data-testid="call-seller-btn">
                 <Button variant="outline" size="lg" className="py-6">
-                  <Phone size={22} className="mr-2" />Call Seller
+                  <Phone size={22} className="mr-2" />{t("product.call_seller")}
                 </Button>
               </a>
             )}
@@ -228,7 +230,7 @@ const ProductPage = () => {
               }`}
             >
               <Heart size={16} fill={isFavorite ? "currentColor" : "none"} />
-              {isFavorite ? "Saved to Favorites" : "Save to Favorites"}
+              {isFavorite ? t("product.saved_to_favorites") : t("product.save_to_favorites")}
             </button>
           )}
         </div>
@@ -238,16 +240,16 @@ const ProductPage = () => {
       {part.price_comparison && part.price_comparison.length > 0 && (
         <section className="mt-12" data-testid="price-comparison-section">
           <h2 className="text-2xl font-bold text-gray-900 mb-6" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-            Compare Prices from Other Sellers
+            {t("product.compare_prices_title")}
           </h2>
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Seller</TableHead>
-                  <TableHead>Price</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
+                  <TableHead>{t("product.table_seller")}</TableHead>
+                  <TableHead>{t("product.table_price")}</TableHead>
+                  <TableHead>{t("product.table_stock")}</TableHead>
+                  <TableHead className="text-right">{t("product.table_action")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -255,14 +257,14 @@ const ProductPage = () => {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{part.seller?.name}</span>
-                      <Badge variant="secondary" className="bg-[#1a5c38]/10 text-[#1a5c38]">Current</Badge>
+                      <Badge variant="secondary" className="bg-[#1a5c38]/10 text-[#1a5c38]">{t("product.current_badge")}</Badge>
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold text-[#1a5c38]">{part.price?.toLocaleString()} FCFA</span>
                       {part.price === lowestPrice && (
-                        <Badge className="bg-yellow-400 text-gray-900 hover:bg-yellow-400">Best Price</Badge>
+                        <Badge className="bg-yellow-400 text-gray-900 hover:bg-yellow-400">{t("product.best_price_badge")}</Badge>
                       )}
                     </div>
                   </TableCell>
@@ -277,7 +279,7 @@ const ProductPage = () => {
                       onClick={() => logEvent("whatsapp_click", { part_id: part.id, seller_id: part.seller?.id })}
                     >
                       <Button size="sm" className="bg-[#25D366] hover:bg-[#128C7E]">
-                        <MessageCircle size={14} className="mr-1" />Contact
+                        <MessageCircle size={14} className="mr-1" />{t("product.contact_btn")}
                       </Button>
                     </a>
                   </TableCell>
@@ -286,7 +288,11 @@ const ProductPage = () => {
                 {part.price_comparison.map((comp) => {
                   const compStockInfo = getStockInfo(comp.stock);
                   const compMsg = encodeURIComponent(
-                    `Hello, I found this spare part on AutoNexus.\n\nProduct: ${comp.name}\nPart Number: ${comp.part_number}\nPrice: ${comp.price?.toLocaleString()} FCFA\n\nIs this part still available?`
+                    t("whatsapp.part_inquiry_no_vehicle", {
+                      name: comp.name,
+                      partNumber: comp.part_number,
+                      price: comp.price?.toLocaleString(),
+                    })
                   );
                   const compLink = comp.seller?.whatsapp
                     ? `https://wa.me/${comp.seller.whatsapp.replace('+', '')}?text=${compMsg}`
@@ -311,7 +317,7 @@ const ProductPage = () => {
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold">{comp.price?.toLocaleString()} FCFA</span>
                           {comp.price === lowestPrice && (
-                            <Badge className="bg-yellow-400 text-gray-900 hover:bg-yellow-400">Best Price</Badge>
+                            <Badge className="bg-yellow-400 text-gray-900 hover:bg-yellow-400">{t("product.best_price_badge")}</Badge>
                           )}
                         </div>
                       </TableCell>
@@ -326,7 +332,7 @@ const ProductPage = () => {
                           onClick={() => logEvent("whatsapp_click", { part_id: comp.id, seller_id: comp.seller?.id })}
                         >
                           <Button size="sm" variant="outline">
-                            <MessageCircle size={14} className="mr-1" />Contact
+                            <MessageCircle size={14} className="mr-1" />{t("product.contact_btn")}
                           </Button>
                         </a>
                       </TableCell>

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import {
   MessageSquare, Clock, MapPin, Loader2, Plus, Car, AlertCircle,
   CheckCircle2, ChevronDown, ChevronUp, Phone, Star, BadgeCheck
@@ -14,9 +15,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../components/ui/dialog";
 import { useAuth } from "../context/AuthContext";
+import { getErrorMessage } from "../lib/errorMessage";
 
 const RequestsPage = () => {
   const { isAuthenticated, user, getAuthHeader } = useAuth();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +54,7 @@ const RequestsPage = () => {
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleDateString(i18n.language === "fr" ? "fr-FR" : "en-US", { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const handleNewRequest = () => {
@@ -69,16 +72,16 @@ const RequestsPage = () => {
         {},
         { headers: getAuthHeader() }
       );
-      toast.success(`You accepted ${resp.seller_name}'s quote. You can now rate them.`);
+      toast.success(t("requests.toast_accepted", { name: resp.seller_name }));
       loadRequests();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to accept quote");
+      toast.error(getErrorMessage(error, "requests.toast_accept_failed"));
     }
   };
 
   const openRating = (request) => {
     const seller = request.responses?.find(r => r.seller_id === request.accepted_seller_id);
-    setRateTarget({ seller_id: request.accepted_seller_id, seller_name: seller?.seller_name || "Seller" });
+    setRateTarget({ seller_id: request.accepted_seller_id, seller_name: seller?.seller_name || t("requests.seller_fallback_name") });
     setRatingValue(0);
     setRatingHover(0);
     setRatingComment("");
@@ -87,7 +90,7 @@ const RequestsPage = () => {
 
   const submitRating = async () => {
     if (ratingValue < 1) {
-      toast.error("Please pick a star rating");
+      toast.error(t("requests.toast_pick_rating"));
       return;
     }
     setSubmitting(true);
@@ -97,11 +100,11 @@ const RequestsPage = () => {
         { rating: ratingValue, comment: ratingComment || undefined },
         { headers: getAuthHeader() }
       );
-      toast.success("Thanks for your rating!");
+      toast.success(t("requests.toast_rating_thanks"));
       setRateOpen(false);
       loadRequests();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to submit rating");
+      toast.error(getErrorMessage(error, "requests.toast_rating_failed"));
     } finally {
       setSubmitting(false);
     }
@@ -115,12 +118,12 @@ const RequestsPage = () => {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2"
             style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-            Part Requests
+            {t("requests.title")}
           </h1>
-          <p className="text-gray-500">Mechanics and car owners looking for spare parts</p>
+          <p className="text-gray-500">{t("requests.subtitle")}</p>
         </div>
         <Button onClick={handleNewRequest} className="bg-[#1a5c38] hover:bg-[#144a2d]" data-testid="new-request-btn">
-          <Plus size={18} className="mr-2" />Post a Request
+          <Plus size={18} className="mr-2" />{t("requests.post_request_btn")}
         </Button>
       </div>
 
@@ -133,7 +136,7 @@ const RequestsPage = () => {
             onClick={() => setFilter(status)}
             className={filter === status ? "bg-[#1a5c38] hover:bg-[#144a2d]" : ""}
           >
-            {status.charAt(0).toUpperCase() + status.slice(1)}
+            {t(`requests.filter_${status}`)}
           </Button>
         ))}
       </div>
@@ -145,9 +148,9 @@ const RequestsPage = () => {
       ) : requests.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
           <MessageSquare size={48} className="text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 mb-4">No requests found</p>
+          <p className="text-gray-500 mb-4">{t("requests.no_requests_found")}</p>
           <Button onClick={handleNewRequest} className="bg-[#1a5c38] hover:bg-[#144a2d]">
-            Post the first request
+            {t("requests.post_first_request")}
           </Button>
         </div>
       ) : (
@@ -161,7 +164,7 @@ const RequestsPage = () => {
                       <h3 className="font-semibold text-gray-900 text-lg">{request.part_name}</h3>
                       {request.urgency === "urgent" && (
                         <Badge className="bg-red-100 text-red-700">
-                          <AlertCircle size={12} className="mr-1" />Urgent
+                          <AlertCircle size={12} className="mr-1" />{t("dashboard.urgent_badge")}
                         </Badge>
                       )}
                       <Badge className={
@@ -171,10 +174,10 @@ const RequestsPage = () => {
                         "bg-gray-100 text-gray-700"
                       }>
                         {request.status === "responded" ? (
-                          <><CheckCircle2 size={12} className="mr-1" />Responded ({request.responses?.length})</>
+                          <><CheckCircle2 size={12} className="mr-1" />{t("requests.status_responded", { count: request.responses?.length })}</>
                         ) : request.status === "fulfilled" ? (
-                          <><BadgeCheck size={12} className="mr-1" />Fulfilled</>
-                        ) : request.status}
+                          <><BadgeCheck size={12} className="mr-1" />{t("requests.status_fulfilled")}</>
+                        ) : t("requests.status_open")}
                       </Badge>
                     </div>
 
@@ -195,7 +198,7 @@ const RequestsPage = () => {
                         <Clock size={12} />{formatDate(request.created_at)}
                       </span>
                       {request.user_name && (
-                        <span>By: {request.user_name}</span>
+                        <span>{t("requests.by_label", { name: request.user_name })}</span>
                       )}
                     </div>
                   </div>
@@ -204,11 +207,11 @@ const RequestsPage = () => {
                   {isOwner(request) && request.status === "fulfilled" && !request.rated && (
                     <Button size="sm" className="bg-[#1a5c38] hover:bg-[#144a2d] flex-shrink-0"
                       onClick={() => openRating(request)}>
-                      <Star size={14} className="mr-1" />Rate Seller
+                      <Star size={14} className="mr-1" />{t("requests.rate_seller_btn")}
                     </Button>
                   )}
                   {isOwner(request) && request.rated && (
-                    <Badge className="bg-gray-100 text-gray-600 flex-shrink-0 h-fit">Rated</Badge>
+                    <Badge className="bg-gray-100 text-gray-600 flex-shrink-0 h-fit">{t("requests.rated_badge")}</Badge>
                   )}
                 </div>
 
@@ -220,14 +223,14 @@ const RequestsPage = () => {
                       className="flex items-center gap-2 text-sm font-medium text-[#1a5c38] hover:underline"
                     >
                       {expandedId === request.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      {request.responses.length} seller {request.responses.length === 1 ? "response" : "responses"}
+                      {t("requests.seller_response_count", { count: request.responses.length })}
                     </button>
 
                     {expandedId === request.id && (
                       <div className="mt-3 space-y-3">
                         {request.responses.map((resp, idx) => {
                           const waLink = `https://wa.me/${resp.seller_whatsapp?.replace('+', '')}?text=${encodeURIComponent(
-                            `Hello ${resp.seller_name}, I saw your response to my request for ${request.part_name} on AutoNexus.`
+                            t("whatsapp.request_response_chat", { sellerName: resp.seller_name, partName: request.part_name })
                           )}`;
                           const isAccepted = request.accepted_seller_id === resp.seller_id;
                           return (
@@ -236,7 +239,7 @@ const RequestsPage = () => {
                                 <div>
                                   <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
                                     {resp.seller_name}
-                                    {isAccepted && <Badge className="bg-[#1a5c38] text-white text-xs">Accepted</Badge>}
+                                    {isAccepted && <Badge className="bg-[#1a5c38] text-white text-xs">{t("requests.accepted_badge")}</Badge>}
                                   </p>
                                   <p className="text-[#1a5c38] font-bold mt-1">
                                     {resp.price?.toLocaleString()} FCFA
@@ -244,20 +247,20 @@ const RequestsPage = () => {
                                   </p>
                                   <p className="text-sm text-gray-600 mt-1">{resp.message}</p>
                                   {!resp.available && (
-                                    <Badge className="bg-red-100 text-red-700 mt-1 text-xs">Not Available</Badge>
+                                    <Badge className="bg-red-100 text-red-700 mt-1 text-xs">{t("requests.not_available_badge")}</Badge>
                                   )}
                                 </div>
                                 <div className="flex flex-col gap-2 flex-shrink-0">
                                   {resp.seller_whatsapp && (
                                     <a href={waLink} target="_blank" rel="noopener noreferrer">
                                       <Button size="sm" className="bg-[#25D366] hover:bg-[#128C7E] text-white w-full">
-                                        <MessageSquare size={12} className="mr-1" />Chat
+                                        <MessageSquare size={12} className="mr-1" />{t("requests.chat_btn")}
                                       </Button>
                                     </a>
                                   )}
                                   {isOwner(request) && request.status !== "fulfilled" && (
                                     <Button size="sm" variant="outline" onClick={() => handleAccept(request, resp)}>
-                                      <CheckCircle2 size={12} className="mr-1" />Accept
+                                      <CheckCircle2 size={12} className="mr-1" />{t("requests.accept_btn")}
                                     </Button>
                                   )}
                                 </div>
@@ -278,7 +281,7 @@ const RequestsPage = () => {
       {/* Rating dialog */}
       <Dialog open={rateOpen} onOpenChange={setRateOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Rate {rateTarget?.seller_name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("requests.rate_dialog_title", { name: rateTarget?.seller_name })}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="flex justify-center gap-1">
               {[1, 2, 3, 4, 5].map((star) => (
@@ -298,7 +301,7 @@ const RequestsPage = () => {
             </div>
             <Textarea
               rows={3}
-              placeholder="Leave a comment (optional)"
+              placeholder={t("requests.rate_comment_placeholder")}
               value={ratingComment}
               onChange={(e) => setRatingComment(e.target.value)}
             />
@@ -308,7 +311,7 @@ const RequestsPage = () => {
               disabled={submitting}
             >
               {submitting ? <Loader2 size={16} className="mr-2 animate-spin" /> : null}
-              Submit Rating
+              {t("requests.submit_rating_btn")}
             </Button>
           </div>
         </DialogContent>

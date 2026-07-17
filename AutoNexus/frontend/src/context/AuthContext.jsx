@@ -2,6 +2,7 @@ import { API } from "../lib/constants";
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
+import i18n from "../i18n";
 
 const AuthContext = createContext(null);
 
@@ -59,7 +60,11 @@ export const AuthProvider = ({ children }) => {
           localStorage.removeItem("autonexus_token");
           setToken(null);
           setUser(null);
-          toast.error("Your session has expired. Please log in again.");
+          // Uses the shared i18n instance directly (not the `t` from
+          // useTranslation()) so this always reflects whichever language is
+          // active at the moment the 401 actually happens, regardless of
+          // when this effect's closure was created (registered once, deps=[]).
+          toast.error(i18n.t("common.session_expired"));
         }
         return Promise.reject(error);
       }

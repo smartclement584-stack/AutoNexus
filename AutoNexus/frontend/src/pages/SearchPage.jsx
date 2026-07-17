@@ -2,6 +2,7 @@ import { API } from "../lib/constants";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
+import { useTranslation } from "react-i18next";
 import { Filter, Loader2, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -15,6 +16,7 @@ import ProductCard from "../components/ProductCard";
 import { logEvent } from "../lib/analytics";
 
 const SearchPage = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [parts, setParts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -147,9 +149,9 @@ const SearchPage = () => {
   const FilterContent = ({ isMobile = false }) => (
     <div className="space-y-4">
       <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Search</label>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">{t("search.label_search")}</label>
         <Input
-          placeholder="Part name or number"
+          placeholder={t("search.placeholder_part_name_or_number")}
           value={isMobile ? localFilters.q : query}
           onChange={(e) => isMobile
             ? setLocalFilters({ ...localFilters, q: e.target.value })
@@ -159,7 +161,7 @@ const SearchPage = () => {
       </div>
 
       <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Brand</label>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">{t("search.label_brand")}</label>
         <Select
           value={isMobile ? localFilters.brand : brand}
           onValueChange={(v) => isMobile
@@ -167,16 +169,16 @@ const SearchPage = () => {
             : updateFilter("brand", v)
           }
         >
-          <SelectTrigger><SelectValue placeholder="All Brands" /></SelectTrigger>
+          <SelectTrigger><SelectValue placeholder={t("search.all_brands")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Brands</SelectItem>
+            <SelectItem value="all">{t("search.all_brands")}</SelectItem>
             {brands.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
       <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Model</label>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">{t("search.label_model")}</label>
         <Select
           value={isMobile ? localFilters.model : model}
           onValueChange={(v) => isMobile
@@ -185,9 +187,9 @@ const SearchPage = () => {
           }
           disabled={isMobile ? !localFilters.brand : !brand}
         >
-          <SelectTrigger><SelectValue placeholder="All Models" /></SelectTrigger>
+          <SelectTrigger><SelectValue placeholder={t("search.all_models")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Models</SelectItem>
+            <SelectItem value="all">{t("search.all_models")}</SelectItem>
             {/* FIX: use mobileModels for mobile sheet, desktopModels for desktop sidebar */}
             {(isMobile ? mobileModels : desktopModels).map((m) => (
               <SelectItem key={m} value={m}>{m}</SelectItem>
@@ -197,51 +199,51 @@ const SearchPage = () => {
       </div>
 
       <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Year</label>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">{t("search.label_year")}</label>
         <Select
           value={isMobile ? localFilters.year : year}
           onValueChange={(v) => isMobile ? setLocalFilters({ ...localFilters, year: v }) : updateFilter("year", v)}
         >
-          <SelectTrigger><SelectValue placeholder="All Years" /></SelectTrigger>
+          <SelectTrigger><SelectValue placeholder={t("search.all_years")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Years</SelectItem>
+            <SelectItem value="all">{t("search.all_years")}</SelectItem>
             {years.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
       <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Category</label>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">{t("search.label_category")}</label>
         <Select
           value={isMobile ? localFilters.category : category}
           onValueChange={(v) => isMobile ? setLocalFilters({ ...localFilters, category: v }) : updateFilter("category", v)}
         >
-          <SelectTrigger><SelectValue placeholder="All Categories" /></SelectTrigger>
+          <SelectTrigger><SelectValue placeholder={t("search.all_categories")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
+            <SelectItem value="all">{t("search.all_categories")}</SelectItem>
             {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
       <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Condition</label>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">{t("search.label_condition")}</label>
         <Select
           value={isMobile ? localFilters.condition : condition}
           onValueChange={(v) => isMobile ? setLocalFilters({ ...localFilters, condition: v }) : updateFilter("condition", v)}
         >
-          <SelectTrigger><SelectValue placeholder="All Conditions" /></SelectTrigger>
+          <SelectTrigger><SelectValue placeholder={t("search.all_conditions")} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Conditions</SelectItem>
-            <SelectItem value="new">New</SelectItem>
-            <SelectItem value="used">Used</SelectItem>
+            <SelectItem value="all">{t("search.all_conditions")}</SelectItem>
+            <SelectItem value="new">{t("common.condition_new")}</SelectItem>
+            <SelectItem value="used">{t("common.condition_used")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       {!isMobile && hasActiveFilters && (
         <Button variant="outline" className="w-full" onClick={clearFilters}>
-          <X size={16} className="mr-2" />Clear Filters
+          <X size={16} className="mr-2" />{t("search.clear_filters")}
         </Button>
       )}
     </div>
@@ -252,19 +254,19 @@ const SearchPage = () => {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-            {query ? `Results for "${query}"` : "All Spare Parts"}
+            {query ? t("search.results_for", { query }) : t("search.all_spare_parts")}
           </h1>
-          <p className="text-gray-500 mt-1">{total} parts found</p>
+          <p className="text-gray-500 mt-1">{t("search.parts_found", { count: total })}</p>
         </div>
 
         <div className="hidden md:flex items-center gap-2">
-          <span className="text-sm text-gray-500">Sort by:</span>
+          <span className="text-sm text-gray-500">{t("search.sort_by")}</span>
           <Select value={sort} onValueChange={(v) => updateFilter("sort", v)}>
             <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="price_asc">Price: Low to High</SelectItem>
-              <SelectItem value="price_desc">Price: High to Low</SelectItem>
-              <SelectItem value="newest">Newest First</SelectItem>
+              <SelectItem value="price_asc">{t("search.sort_price_asc")}</SelectItem>
+              <SelectItem value="price_desc">{t("search.sort_price_desc")}</SelectItem>
+              <SelectItem value="newest">{t("search.sort_newest")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -272,23 +274,23 @@ const SearchPage = () => {
         <Sheet>
           <SheetTrigger asChild>
             <Button variant="outline" className="md:hidden">
-              <SlidersHorizontal size={18} className="mr-2" />Filters
+              <SlidersHorizontal size={18} className="mr-2" />{t("search.filters_btn")}
               {hasActiveFilters && (
                 <span className="ml-2 w-5 h-5 bg-[#1a5c38] text-white rounded-full text-xs flex items-center justify-center">!</span>
               )}
             </Button>
           </SheetTrigger>
           <SheetContent side="right" className="w-full sm:max-w-md">
-            <SheetHeader><SheetTitle>Filters</SheetTitle></SheetHeader>
+            <SheetHeader><SheetTitle>{t("search.filters_title")}</SheetTitle></SheetHeader>
             <div className="mt-6">
               <FilterContent isMobile />
               <div className="flex gap-2 mt-6">
                 <Button variant="outline" className="flex-1" onClick={() => {
                   setLocalFilters({ q: "", brand: "", model: "", year: "", category: "", condition: "", sort: "price_asc" });
                   clearFilters();
-                }}>Clear</Button>
+                }}>{t("search.clear")}</Button>
                 <Button className="flex-1 bg-[#1a5c38] hover:bg-[#144a2d]" onClick={applyMobileFilters}>
-                  Apply Filters
+                  {t("search.apply_filters")}
                 </Button>
               </div>
             </div>
@@ -301,7 +303,7 @@ const SearchPage = () => {
           <div className="sticky top-24 bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-center gap-2 mb-4">
               <Filter size={18} className="text-[#1a5c38]" />
-              <h2 className="font-semibold text-gray-900">Filters</h2>
+              <h2 className="font-semibold text-gray-900">{t("search.filters_title")}</h2>
             </div>
             <FilterContent />
           </div>
@@ -309,13 +311,13 @@ const SearchPage = () => {
 
         <div className="flex-1">
           <div className="flex items-center justify-between mb-4 md:hidden">
-            <span className="text-sm text-gray-500">Sort:</span>
+            <span className="text-sm text-gray-500">{t("search.sort_label")}</span>
             <Select value={sort} onValueChange={(v) => updateFilter("sort", v)}>
               <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="price_asc">Price: Low to High</SelectItem>
-                <SelectItem value="price_desc">Price: High to Low</SelectItem>
-                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="price_asc">{t("search.sort_price_asc")}</SelectItem>
+                <SelectItem value="price_desc">{t("search.sort_price_desc")}</SelectItem>
+                <SelectItem value="newest">{t("search.sort_newest")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -326,8 +328,8 @@ const SearchPage = () => {
             </div>
           ) : parts.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-              <p className="text-gray-500 mb-4">No parts found matching your criteria</p>
-              <Button variant="outline" onClick={clearFilters}>Clear Filters</Button>
+              <p className="text-gray-500 mb-4">{t("search.no_parts_found")}</p>
+              <Button variant="outline" onClick={clearFilters}>{t("search.clear_filters")}</Button>
             </div>
           ) : (
             <>
@@ -337,13 +339,13 @@ const SearchPage = () => {
               {totalPages > 1 && (
                 <div className="flex justify-center gap-2 mt-8">
                   <Button variant="outline" disabled={page === 1} onClick={() => updateFilter("page", (page - 1).toString())}>
-                    Previous
+                    {t("search.previous")}
                   </Button>
                   <span className="flex items-center px-4 text-sm text-gray-600">
-                    Page {page} of {totalPages}
+                    {t("search.page_of", { page, totalPages })}
                   </span>
                   <Button variant="outline" disabled={page === totalPages} onClick={() => updateFilter("page", (page + 1).toString())}>
-                    Next
+                    {t("search.next")}
                   </Button>
                 </div>
               )}

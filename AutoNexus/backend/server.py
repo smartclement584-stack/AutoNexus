@@ -74,7 +74,35 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     # picks it up with no frontend changes required.
     return JSONResponse(
         status_code=429,
-        content={"detail": "Too many attempts. Please wait a minute and try again."}
+        content={
+            "detail": "Too many attempts. Please wait a minute and try again.",
+            "error_code": "RATE_LIMITED",
+        }
+    )
+
+
+class AppException(HTTPException):
+    """HTTPException that additionally carries a stable, machine-readable
+    error_code alongside the existing English `detail` string. The frontend
+    uses error_code to look up a localized (EN/FR) message via i18next
+    without needing to parse or pattern-match the English text; `detail`
+    itself is left completely unchanged so existing consumers that read it
+    directly (including the test suite) keep working exactly as before.
+    Every `raise HTTPException(...)` in this file has been migrated to
+    `raise AppException(..., error_code=...)` -- a plain HTTPException raised
+    anywhere would just fall through to FastAPI's default handler and return
+    `{"detail": ...}` with no error_code, so there's no silent breakage if a
+    future endpoint is added without one; it just won't be localized yet."""
+    def __init__(self, status_code: int, detail: str, error_code: str):
+        super().__init__(status_code=status_code, detail=detail)
+        self.error_code = error_code
+
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "error_code": exc.error_code},
     )
 
 # FIX: Register CORS middleware immediately after app creation, before routes
@@ -521,21 +549,21 @@ def build_catalog_pdf(seller: dict, parts: list) -> bytes:
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise AppException(status_code=401, detail="Authentication required", error_code="AUTH_REQUIRED")
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
         if not user:
-            raise HTTPException(status_code=401, detail="User not found")
+            raise AppException(status_code=401, detail="User not found", error_code="USER_NOT_FOUND")
         if payload.get("token_version", 0) != user.get("token_version", 0):
             # Password was reset since this token was issued — the old
             # session must not keep working after that.
-            raise HTTPException(status_code=401, detail="Session expired, please log in again")
+            raise AppException(status_code=401, detail="Session expired, please log in again", error_code="SESSION_EXPIRED")
         return user
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise AppException(status_code=401, detail="Token expired", error_code="TOKEN_EXPIRED")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise AppException(status_code=401, detail="Invalid token", error_code="INVALID_TOKEN")
 
 async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
@@ -551,7 +579,7 @@ async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(
 
 async def get_current_admin(user: dict = Depends(get_current_user)):
     if not user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin access required")
+        raise AppException(status_code=403, detail="Admin access required", error_code="ADMIN_REQUIRED")
     return user
 
 # ============== AUTH ROUTES ==============
@@ -563,16 +591,16 @@ async def signup(request: Request, data: SignupRequest):
     email = data.email.strip().lower() if data.email else None
 
     if not phone and not email:
-        raise HTTPException(status_code=400, detail="Provide a phone number or an email address")
+        raise AppException(status_code=400, detail="Provide a phone number or an email address", error_code="PHONE_OR_EMAIL_REQUIRED")
 
     if phone and not re.match(r'^\+237[0-9]{9}$', phone):
-        raise HTTPException(status_code=400, detail="Invalid Cameroon phone number. Format: +237XXXXXXXXX")
+        raise AppException(status_code=400, detail="Invalid Cameroon phone number. Format: +237XXXXXXXXX", error_code="INVALID_PHONE_FORMAT")
 
     if email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
-        raise HTTPException(status_code=400, detail="Invalid email address")
+        raise AppException(status_code=400, detail="Invalid email address", error_code="INVALID_EMAIL_FORMAT")
 
     if len(data.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        raise AppException(status_code=400, detail="Password must be at least 6 characters", error_code="PASSWORD_TOO_SHORT")
 
     existing_query = {"$or": []}
     if phone:
@@ -581,7 +609,7 @@ async def signup(request: Request, data: SignupRequest):
         existing_query["$or"].append({"email": email})
     existing = await db.users.find_one(existing_query, {"_id": 0})
     if existing:
-        raise HTTPException(status_code=400, detail="An account with this phone or email already exists")
+        raise AppException(status_code=400, detail="An account with this phone or email already exists", error_code="ACCOUNT_ALREADY_EXISTS")
 
     new_user = User(
         phone=phone,
@@ -616,10 +644,10 @@ async def login(request: Request, data: LoginRequest):
     if not user:
         verify_password(data.password, _DUMMY_PASSWORD_HASH)  # pay the same bcrypt cost either way
         logger.warning(f"Login failed: no user for query type={'email' if is_email else 'phone'}")
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise AppException(status_code=401, detail="Invalid credentials", error_code="INVALID_CREDENTIALS")
     if not verify_password(data.password, user.get("password_hash", "")):
         logger.warning(f"Login failed: password mismatch for user_id={user['id']}")
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise AppException(status_code=401, detail="Invalid credentials", error_code="INVALID_CREDENTIALS")
 
     token = create_token(user["id"], user["role"], user.get("token_version", 0))
     if user.get("seller_id"):
@@ -687,13 +715,13 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
     query = {"email": identifier.lower()} if is_email else {"phone": normalize_phone(identifier)}
 
     if len(data.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        raise AppException(status_code=400, detail="Password must be at least 6 characters", error_code="PASSWORD_TOO_SHORT")
 
     # Every failure path below raises the exact same message. Distinguishing
     # "no such user" from "wrong code" from "expired" from "too many tries"
     # would both leak account existence and hand an attacker a signal about
     # how close a guess was — so all of them collapse to one response.
-    generic_error = HTTPException(status_code=400, detail="Invalid or expired code")
+    generic_error = AppException(status_code=400, detail="Invalid or expired code", error_code="INVALID_OR_EXPIRED_CODE")
 
     user = await db.users.find_one(query, {"_id": 0})
     if not user:
@@ -709,7 +737,7 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
         raise generic_error
 
     if attempts >= 5:
-        raise HTTPException(status_code=400, detail="Too many incorrect attempts. Please request a new code.")
+        raise AppException(status_code=400, detail="Too many incorrect attempts. Please request a new code.", error_code="TOO_MANY_RESET_ATTEMPTS")
 
     if datetime.now(timezone.utc) > datetime.fromisoformat(reset_expires):
         # Clean up the stale code so it can't be brute-forced after expiry either.
@@ -725,7 +753,7 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
         raise generic_error
 
     if verify_password(data.new_password, user.get("password_hash", "")):
-        raise HTTPException(status_code=400, detail="New password must be different from your current password")
+        raise AppException(status_code=400, detail="New password must be different from your current password", error_code="PASSWORD_SAME_AS_OLD")
 
     # Success: set the new password, invalidate the code (single-use), and
     # bump token_version so any JWT issued before this reset — including one
@@ -778,7 +806,7 @@ async def add_favorite(part_id: str, user: dict = Depends(get_current_user)):
     """Save a part to favorites"""
     part = await db.parts.find_one({"id": part_id}, {"_id": 0})
     if not part:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
     await db.users.update_one({"id": user["id"]}, {"$addToSet": {"favorites": part_id}})
     return {"status": "added", "part_id": part_id}
 
@@ -889,7 +917,7 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
         storage_backend = _init_storage()
 
     if file.content_type not in UPLOAD_CONTENT_TYPES:
-        raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed")
+        raise AppException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed", error_code="INVALID_IMAGE_FORMAT")
 
     # Read in bounded chunks so an oversized upload is rejected as soon as it
     # crosses the limit, instead of being fully buffered into memory first.
@@ -901,12 +929,12 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
             break
         total += len(chunk)
         if total > UPLOAD_MAX_BYTES:
-            raise HTTPException(status_code=400, detail="Image must be under 5MB")
+            raise AppException(status_code=400, detail="Image must be under 5MB", error_code="IMAGE_TOO_LARGE")
         chunks.append(chunk)
     contents = b"".join(chunks)
 
     if not _sniff_image_signature(contents[:12], file.content_type):
-        raise HTTPException(status_code=400, detail="File content doesn't match a valid image")
+        raise AppException(status_code=400, detail="File content doesn't match a valid image", error_code="IMAGE_CONTENT_MISMATCH")
 
     ext = UPLOAD_CONTENT_TYPES[file.content_type]
     filename = f"{uuid.uuid4()}.{ext}"
@@ -915,7 +943,7 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
         url = await storage_backend.store(filename, contents)
     except Exception as e:
         logger.error(f"Failed to store image {filename}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload image")
+        raise AppException(status_code=500, detail="Failed to upload image", error_code="IMAGE_UPLOAD_FAILED")
 
     return {"url": url, "filename": filename}
 
@@ -1035,7 +1063,7 @@ async def search_parts(
 async def get_part(part_id: str, user: Optional[dict] = Depends(get_optional_user)):
     part = await db.parts.find_one({"id": part_id}, {"_id": 0})
     if not part:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
 
     seller = await db.sellers.find_one({"id": part["seller_id"]}, {"_id": 0})
     if seller:
@@ -1082,7 +1110,7 @@ async def list_sellers(q: Optional[str] = None, page: int = 1, limit: int = 20):
 async def get_seller(seller_id: str):
     seller = await db.sellers.find_one({"id": seller_id, "active": {"$ne": False}}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(100)
     seller["parts"] = parts
     return seller
@@ -1116,21 +1144,21 @@ async def create_request(data: PartRequestCreate, user: dict = Depends(get_curre
 async def get_request(request_id: str):
     request = await db.requests.find_one({"id": request_id}, {"_id": 0})
     if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise AppException(status_code=404, detail="Request not found", error_code="REQUEST_NOT_FOUND")
     return request
 
 @api_router.post("/requests/{request_id}/respond")
 async def respond_to_request(request_id: str, response: RequestResponse, user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Only sellers can respond to requests")
+        raise AppException(status_code=403, detail="Only sellers can respond to requests", error_code="SELLER_ONLY_ACTION")
 
     request = await db.requests.find_one({"id": request_id}, {"_id": 0})
     if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise AppException(status_code=404, detail="Request not found", error_code="REQUEST_NOT_FOUND")
 
     seller = await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=403, detail="Seller profile not found")
+        raise AppException(status_code=403, detail="Seller profile not found", error_code="SELLER_PROFILE_NOT_FOUND")
 
     response_data = {
         "seller_id": seller["id"],
@@ -1184,13 +1212,13 @@ async def accept_request_quote(request_id: str, seller_id: str, user: dict = Dep
     """Buyer accepts a seller's quote, closing the request and crediting the seller with a real sale."""
     request = await db.requests.find_one({"id": request_id}, {"_id": 0})
     if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise AppException(status_code=404, detail="Request not found", error_code="REQUEST_NOT_FOUND")
     if request["user_id"] != user["id"]:
-        raise HTTPException(status_code=403, detail="This isn't your request")
+        raise AppException(status_code=403, detail="This isn't your request", error_code="NOT_YOUR_REQUEST")
 
     matching = next((r for r in request.get("responses", []) if r["seller_id"] == seller_id), None)
     if not matching:
-        raise HTTPException(status_code=404, detail="That seller hasn't responded to this request")
+        raise AppException(status_code=404, detail="That seller hasn't responded to this request", error_code="SELLER_HAS_NOT_RESPONDED")
 
     # Atomically transition the request to fulfilled ONLY if it isn't already
     # fulfilled. The previous version checked request["status"] from the
@@ -1213,7 +1241,7 @@ async def accept_request_quote(request_id: str, seller_id: str, user: dict = Dep
         }}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=400, detail="This request has already been fulfilled")
+        raise AppException(status_code=400, detail="This request has already been fulfilled", error_code="REQUEST_ALREADY_FULFILLED")
 
     # Only the caller whose update above actually won the race reaches here,
     # so sales_count is never incremented speculatively.
@@ -1227,7 +1255,7 @@ async def rate_seller(seller_id: str, data: RatingCreate, user: dict = Depends(g
     """Buyers can only rate a seller once per completed (accepted) request — this is what keeps
     ratings real instead of an admin-editable number."""
     if data.rating < 1 or data.rating > 5:
-        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+        raise AppException(status_code=400, detail="Rating must be between 1 and 5", error_code="INVALID_RATING_VALUE")
 
     fulfilled_request = await db.requests.find_one({
         "user_id": user["id"],
@@ -1237,10 +1265,7 @@ async def rate_seller(seller_id: str, data: RatingCreate, user: dict = Depends(g
     }, {"_id": 0})
 
     if not fulfilled_request:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only rate a seller after accepting one of their quotes, and only once per deal"
-        )
+        raise AppException(status_code=403, detail="You can only rate a seller after accepting one of their quotes, and only once per deal", error_code="RATING_NOT_ALLOWED")
 
     rating_obj = Rating(
         seller_id=seller_id,
@@ -1294,15 +1319,15 @@ async def get_seller_ratings(seller_id: str, page: int = 1, limit: int = 20):
 @api_router.post("/seller/register")
 async def register_seller(data: SellerCreate, user: dict = Depends(get_current_user)):
     if user["role"] == "seller":
-        raise HTTPException(status_code=400, detail="Already registered as seller")
+        raise AppException(status_code=400, detail="Already registered as seller", error_code="ALREADY_SELLER")
 
     existing_seller_id = user.get("seller_id")
     if existing_seller_id:
         existing = await db.sellers.find_one({"id": existing_seller_id}, {"_id": 0})
         if existing and existing.get("status") == "pending":
-            raise HTTPException(status_code=400, detail="Your seller application is already pending admin approval")
+            raise AppException(status_code=400, detail="Your seller application is already pending admin approval", error_code="SELLER_APPLICATION_PENDING")
         if existing and existing.get("status") == "approved":
-            raise HTTPException(status_code=400, detail="Already registered as seller")
+            raise AppException(status_code=400, detail="Already registered as seller", error_code="ALREADY_SELLER")
         # status == "rejected" (or missing record) -> allow re-apply below
 
     seller = Seller(**data.model_dump(), status="pending", verified=False)
@@ -1329,35 +1354,35 @@ async def seller_application_status(user: dict = Depends(get_current_user)):
 @api_router.get("/seller/profile")
 async def get_seller_profile(user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     seller = await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller profile not found")
+        raise AppException(status_code=404, detail="Seller profile not found", error_code="SELLER_PROFILE_NOT_FOUND")
     return seller
 
 @api_router.put("/seller/profile")
 async def update_seller_profile(data: SellerUpdate, user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if update_data:
         result = await db.sellers.update_one({"id": user["seller_id"]}, {"$set": update_data})
         if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="Seller profile not found")
+            raise AppException(status_code=404, detail="Seller profile not found", error_code="SELLER_PROFILE_NOT_FOUND")
     await touch_seller_activity(user["seller_id"])
     return await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
 
 @api_router.get("/seller/parts")
 async def get_seller_parts(user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     parts = await db.parts.find({"seller_id": user["seller_id"]}, {"_id": 0}).to_list(1000)
     return {"parts": parts}
 
 @api_router.post("/seller/parts")
 async def add_seller_part(data: SparePartCreate, user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     part = SparePart(seller_id=user["seller_id"], **data.model_dump())
     part_dict = part.model_dump()
     part_dict['created_at'] = part_dict['created_at'].isoformat()
@@ -1368,10 +1393,10 @@ async def add_seller_part(data: SparePartCreate, user: dict = Depends(get_curren
 @api_router.put("/seller/parts/{part_id}")
 async def update_seller_part(part_id: str, data: SparePartUpdate, user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     part = await db.parts.find_one({"id": part_id, "seller_id": user["seller_id"]}, {"_id": 0})
     if not part:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if update_data:
         await db.parts.update_one({"id": part_id}, {"$set": update_data})
@@ -1381,27 +1406,27 @@ async def update_seller_part(part_id: str, data: SparePartUpdate, user: dict = D
 @api_router.delete("/seller/parts/{part_id}")
 async def delete_seller_part(part_id: str, user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     result = await db.parts.delete_one({"id": part_id, "seller_id": user["seller_id"]})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
     await touch_seller_activity(user["seller_id"])
     return {"status": "deleted"}
 
 @api_router.get("/seller/requests")
 async def get_seller_requests(user: dict = Depends(get_current_user)):
     if user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     requests = await db.requests.find({"status": "open"}, {"_id": 0}).sort([("created_at", -1)]).to_list(100)
     return {"requests": requests}
 
 @api_router.get("/seller/catalog/pdf")
 async def download_own_catalog(user: dict = Depends(get_current_user)):
     if user["role"] != "seller" or not user.get("seller_id"):
-        raise HTTPException(status_code=403, detail="Not a seller")
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     seller = await db.sellers.find_one({"id": user["seller_id"]}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller profile not found")
+        raise AppException(status_code=404, detail="Seller profile not found", error_code="SELLER_PROFILE_NOT_FOUND")
     parts = await db.parts.find({"seller_id": user["seller_id"]}, {"_id": 0}).to_list(2000)
     pdf_bytes = build_catalog_pdf(seller, parts)
     filename = f"{seller['name'].replace(' ', '_')}_catalog.pdf"
@@ -1464,14 +1489,14 @@ async def admin_toggle_admin(user_id: str, admin: dict = Depends(get_current_adm
     yourself out and against demoting the last remaining admin."""
     target = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not target:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise AppException(status_code=404, detail="User not found", error_code="USER_NOT_FOUND")
 
     if target.get("is_admin"):
         if target["id"] == admin["id"]:
-            raise HTTPException(status_code=400, detail="You can't revoke your own admin access")
+            raise AppException(status_code=400, detail="You can't revoke your own admin access", error_code="CANNOT_REVOKE_OWN_ADMIN")
         remaining_admins = await db.users.count_documents({"is_admin": True})
         if remaining_admins <= 1:
-            raise HTTPException(status_code=400, detail="Can't remove the last remaining admin")
+            raise AppException(status_code=400, detail="Can't remove the last remaining admin", error_code="CANNOT_REMOVE_LAST_ADMIN")
         await db.users.update_one({"id": user_id}, {"$set": {"is_admin": False}})
         return {"id": user_id, "is_admin": False}
     else:
@@ -1516,7 +1541,7 @@ async def admin_list_sellers(
 async def admin_get_seller(seller_id: str, admin: dict = Depends(get_current_admin)):
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(1000)
     seller["parts"] = parts
     return seller
@@ -1535,7 +1560,7 @@ async def admin_approve_seller(seller_id: str, admin: dict = Depends(get_current
     """Approve a pending seller application. Promotes the linked user's role to 'seller'."""
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
 
     now = datetime.now(timezone.utc)
     await db.sellers.update_one(
@@ -1568,7 +1593,7 @@ async def admin_reject_seller(seller_id: str, admin: dict = Depends(get_current_
     """Reject a pending seller application. The applicant keeps their buyer account and may re-apply."""
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
 
     now = datetime.now(timezone.utc)
     await db.sellers.update_one(
@@ -1597,7 +1622,7 @@ async def admin_update_seller(seller_id: str, data: AdminSellerUpdate, admin: di
     """Admin can edit ANY seller's profile — name, contact info, image, verified badge, rating, active status."""
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if update_data:
         await db.sellers.update_one({"id": seller_id}, {"$set": update_data})
@@ -1608,7 +1633,7 @@ async def admin_deactivate_seller(seller_id: str, admin: dict = Depends(get_curr
     """Hide a seller (and their parts) from public listings without deleting any data."""
     result = await db.sellers.update_one({"id": seller_id}, {"$set": {"active": False}})
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     return {"status": "deactivated", "seller_id": seller_id}
 
 @api_router.post("/admin/sellers/{seller_id}/activate")
@@ -1616,7 +1641,7 @@ async def admin_activate_seller(seller_id: str, admin: dict = Depends(get_curren
     """Restore a previously deactivated seller to public listings."""
     result = await db.sellers.update_one({"id": seller_id}, {"$set": {"active": True}})
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     return {"status": "activated", "seller_id": seller_id}
 
 @api_router.delete("/admin/sellers/{seller_id}")
@@ -1625,7 +1650,7 @@ async def admin_delete_seller(seller_id: str, admin: dict = Depends(get_current_
     This cannot be undone — prefer deactivate for most cases."""
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
 
     await db.parts.delete_many({"seller_id": seller_id})
     await db.sellers.delete_one({"id": seller_id})
@@ -1639,7 +1664,7 @@ async def admin_delete_seller(seller_id: str, admin: dict = Depends(get_current_
 async def admin_get_seller_parts(seller_id: str, admin: dict = Depends(get_current_admin)):
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(2000)
     return {"parts": parts}
 
@@ -1648,7 +1673,7 @@ async def admin_add_seller_part(seller_id: str, data: SparePartCreate, admin: di
     """Admin adds a product on behalf of ANY seller, whether or not that seller has a linked user account."""
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     part = SparePart(seller_id=seller_id, **data.model_dump())
     part_dict = part.model_dump()
     part_dict['created_at'] = part_dict['created_at'].isoformat()
@@ -1659,7 +1684,7 @@ async def admin_add_seller_part(seller_id: str, data: SparePartCreate, admin: di
 async def admin_update_seller_part(seller_id: str, part_id: str, data: SparePartUpdate, admin: dict = Depends(get_current_admin)):
     part = await db.parts.find_one({"id": part_id, "seller_id": seller_id}, {"_id": 0})
     if not part:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if update_data:
         await db.parts.update_one({"id": part_id}, {"$set": update_data})
@@ -1669,14 +1694,14 @@ async def admin_update_seller_part(seller_id: str, part_id: str, data: SparePart
 async def admin_delete_seller_part(seller_id: str, part_id: str, admin: dict = Depends(get_current_admin)):
     result = await db.parts.delete_one({"id": part_id, "seller_id": seller_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
     return {"status": "deleted"}
 
 @api_router.get("/admin/sellers/{seller_id}/catalog/pdf")
 async def admin_download_seller_catalog(seller_id: str, admin: dict = Depends(get_current_admin)):
     seller = await db.sellers.find_one({"id": seller_id}, {"_id": 0})
     if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
+        raise AppException(status_code=404, detail="Seller not found", error_code="SELLER_NOT_FOUND")
     parts = await db.parts.find({"seller_id": seller_id}, {"_id": 0}).to_list(2000)
     pdf_bytes = build_catalog_pdf(seller, parts)
     filename = f"{seller['name'].replace(' ', '_')}_catalog.pdf"
@@ -1712,7 +1737,7 @@ async def admin_list_parts(
 async def admin_delete_part(part_id: str, admin: dict = Depends(get_current_admin)):
     result = await db.parts.delete_one({"id": part_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Part not found")
+        raise AppException(status_code=404, detail="Part not found", error_code="PART_NOT_FOUND")
     return {"status": "deleted"}
 
 @api_router.get("/admin/requests")

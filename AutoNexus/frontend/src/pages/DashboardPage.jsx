@@ -2,6 +2,7 @@ import { API } from "../lib/constants";
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import {
   Plus, Package, MessageSquare, Edit, Trash2, Loader2, Store, X,
   Upload, Image as ImageIcon, CheckCircle2, AlertCircle, Car, MapPin, Send, Download
@@ -25,10 +26,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "../components/ui/alert-dialog";
 import { useAuth } from "../context/AuthContext";
+import { getErrorMessage } from "../lib/errorMessage";
 
 const DashboardPage = () => {
   // FIX: use stable getAuthHeader from useCallback in AuthContext — no more infinite loops
   const { user, isSeller, getAuthHeader } = useAuth();
+  const { t } = useTranslation();
   const [parts, setParts] = useState([]);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -148,9 +151,13 @@ const DashboardPage = () => {
       } else {
         setPartForm(f => ({ ...f, image: imageUrl }));
       }
-      toast.success("Image uploaded!");
+      toast.success(t("dashboard.toast_image_uploaded"));
     } catch (e) {
-      toast.error("Image upload failed");
+      // Uses the real backend reason (e.g. "Image must be under 5MB") via
+      // its error_code instead of a generic message -- previously this
+      // always showed "Image upload failed" regardless of why, which hid
+      // useful, already-computed detail from the user.
+      toast.error(getErrorMessage(e, "errors.IMAGE_UPLOAD_FAILED"));
     } finally {
       setImageUploading(false);
     }
@@ -160,16 +167,16 @@ const DashboardPage = () => {
   const handleRegisterSeller = async (e) => {
     e.preventDefault();
     if (!registerData.name || !registerData.phone || !registerData.whatsapp || !registerData.id_document) {
-      toast.error("Please fill in all required fields");
+      toast.error(t("common.please_fill_required_fields"));
       return;
     }
     try {
       await axios.post(`${API}/seller/register`, registerData, { headers: getAuthHeader() });
-      toast.success("Application submitted! We'll notify you once an admin reviews it.");
+      toast.success(t("seller_registration.toast_submitted"));
       setRegisterOpen(false);
       setApplicationStatus("pending");
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to submit application");
+      toast.error(getErrorMessage(error, "errors.failed_to_submit_application"));
     }
   };
 
@@ -189,7 +196,7 @@ const DashboardPage = () => {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      toast.error("Failed to download catalog");
+      toast.error(t("dashboard.toast_catalog_download_failed"));
     }
   };
 
@@ -197,15 +204,15 @@ const DashboardPage = () => {
   const handleEditShop = async (e) => {
     e.preventDefault();
     if (!editShopData.name || !editShopData.phone || !editShopData.whatsapp) {
-      toast.error("Please fill in all required fields");
+      toast.error(t("common.please_fill_required_fields"));
       return;
     }
     try {
       await axios.put(`${API}/seller/profile`, editShopData, { headers: getAuthHeader() });
-      toast.success("Shop profile updated!");
+      toast.success(t("dashboard.toast_shop_updated"));
       setEditShopOpen(false);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to update shop profile");
+      toast.error(getErrorMessage(error, "errors.failed_to_update_shop"));
     }
   };
 
@@ -213,17 +220,17 @@ const DashboardPage = () => {
   const handleAddPart = async (e) => {
     e.preventDefault();
     if (!partForm.name || !partForm.part_number || !partForm.price || !partForm.stock) {
-      toast.error("Please fill in all required fields");
+      toast.error(t("common.please_fill_required_fields"));
       return;
     }
     try {
       const data = { ...partForm, price: parseInt(partForm.price), stock: parseInt(partForm.stock) };
       if (editingPart) {
         await axios.put(`${API}/seller/parts/${editingPart.id}`, data, { headers: getAuthHeader() });
-        toast.success("Part updated!");
+        toast.success(t("dashboard.toast_part_updated"));
       } else {
         await axios.post(`${API}/seller/parts`, data, { headers: getAuthHeader() });
-        toast.success("Part added!");
+        toast.success(t("dashboard.toast_part_added"));
       }
       setAddPartOpen(false);
       setEditingPart(null);
@@ -231,17 +238,17 @@ const DashboardPage = () => {
       const partsRes = await axios.get(`${API}/seller/parts`, { headers: getAuthHeader() });
       setParts(partsRes.data.parts);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to save part");
+      toast.error(getErrorMessage(error, "errors.failed_to_save_part"));
     }
   };
 
   const handleDeletePart = async (partId) => {
     try {
       await axios.delete(`${API}/seller/parts/${partId}`, { headers: getAuthHeader() });
-      toast.success("Part deleted!");
+      toast.success(t("dashboard.toast_part_deleted"));
       setParts(parts.filter(p => p.id !== partId));
     } catch (error) {
-      toast.error("Failed to delete part");
+      toast.error(getErrorMessage(error, "errors.failed_to_delete_part"));
     }
   };
 
@@ -271,7 +278,7 @@ const DashboardPage = () => {
   const handleRespond = async (e) => {
     e.preventDefault();
     if (!responseForm.price || !responseForm.message) {
-      toast.error("Please fill in price and message");
+      toast.error(t("dashboard.toast_fill_price_message"));
       return;
     }
     try {
@@ -280,13 +287,13 @@ const DashboardPage = () => {
         { ...responseForm, price: parseInt(responseForm.price), seller_id: user?.seller_id },
         { headers: getAuthHeader() }
       );
-      toast.success("Response sent! The requester has been notified.");
+      toast.success(t("dashboard.toast_response_sent"));
       setRespondOpen(false);
       // Refresh requests
       const requestsRes = await axios.get(`${API}/seller/requests`, { headers: getAuthHeader() });
       setRequests(requestsRes.data.requests);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to send response");
+      toast.error(getErrorMessage(error, "errors.failed_to_send_response"));
     }
   };
 
@@ -306,11 +313,10 @@ const DashboardPage = () => {
           <div className="text-center bg-white rounded-2xl border border-gray-200 p-8">
             <AlertCircle size={64} className="mx-auto text-amber-400 mb-6" />
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-4" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-              Application Under Review
+              {t("seller_registration.pending_title")}
             </h1>
             <p className="text-gray-500">
-              Your seller application has been submitted and is waiting for admin approval.
-              We'll let you know as soon as it's reviewed.
+              {t("seller_registration.pending_message")}
             </p>
           </div>
         </div>
@@ -322,59 +328,59 @@ const DashboardPage = () => {
         <div className="text-center bg-white rounded-2xl border border-gray-200 p-8">
           <Store size={64} className="mx-auto text-gray-300 mb-6" />
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-4" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-            Become a Seller on AutoNexus
+            {t("seller_registration.become_seller_title")}
           </h1>
           <p className="text-gray-500 mb-6">
-            Register your shop and start selling spare parts to mechanics and car owners in Camp Yabassi
+            {t("seller_registration.become_seller_subtitle")}
           </p>
           {applicationStatus === "rejected" && (
             <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-3 mb-6 text-left">
               <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-red-700">
-                Your previous application wasn't approved. You're welcome to submit a new one below.
+                {t("seller_registration.rejected_notice")}
               </p>
             </div>
           )}
           <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
             <DialogTrigger asChild>
               <Button className="bg-[#1a5c38] hover:bg-[#144a2d]" data-testid="register-seller-btn">
-                <Store size={18} className="mr-2" />Register as Seller
+                <Store size={18} className="mr-2" />{t("seller_registration.register_btn")}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>Register Your Shop</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>{t("seller_registration.dialog_title")}</DialogTitle></DialogHeader>
               <form onSubmit={handleRegisterSeller} className="space-y-4">
-                <div><Label>Shop Name *</Label>
-                  <Input placeholder="Your shop name" value={registerData.name}
+                <div><Label>{t("common.shop_name_label")}</Label>
+                  <Input placeholder={t("common.shop_name_placeholder")} value={registerData.name}
                     onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })} />
                 </div>
-                <div><Label>Location</Label>
+                <div><Label>{t("common.location_label")}</Label>
                   <Input value={registerData.location}
                     onChange={(e) => setRegisterData({ ...registerData, location: e.target.value })} />
                 </div>
-                <div><Label>Description</Label>
+                <div><Label>{t("common.description_label")}</Label>
                   <Textarea rows={2} value={registerData.description}
                     onChange={(e) => setRegisterData({ ...registerData, description: e.target.value })} />
                 </div>
-                <div><Label>Phone Number *</Label>
-                  <Input placeholder="+237XXXXXXXXX" value={registerData.phone}
+                <div><Label>{t("common.phone_number_label")}</Label>
+                  <Input placeholder={t("common.phone_placeholder")} value={registerData.phone}
                     onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })} />
                 </div>
-                <div><Label>WhatsApp Number *</Label>
-                  <Input placeholder="+237XXXXXXXXX" value={registerData.whatsapp}
+                <div><Label>{t("common.whatsapp_number_label")}</Label>
+                  <Input placeholder={t("common.phone_placeholder")} value={registerData.whatsapp}
                     onChange={(e) => setRegisterData({ ...registerData, whatsapp: e.target.value })} />
                 </div>
-                <div><Label>National ID Number or Business Registration Number *</Label>
-                  <Input placeholder="e.g. CNI number or RCCM number" value={registerData.id_document}
+                <div><Label>{t("seller_registration.id_document_label")}</Label>
+                  <Input placeholder={t("seller_registration.id_document_placeholder")} value={registerData.id_document}
                     onChange={(e) => setRegisterData({ ...registerData, id_document: e.target.value })} />
                   <p className="text-xs text-gray-400 mt-1">
-                    Used by our team to verify you before approving your shop. Not shown publicly.
+                    {t("seller_registration.id_document_hint")}
                   </p>
                 </div>
 
                 {/* Shop logo upload */}
                 <div>
-                  <Label>Shop Logo / Photo</Label>
+                  <Label>{t("common.shop_logo_label")}</Label>
                   <div className="mt-1 space-y-2">
                     {registerData.image ? (
                       <div className="relative w-full h-32 bg-gray-100 rounded-lg overflow-hidden">
@@ -394,21 +400,21 @@ const DashboardPage = () => {
                         ) : (
                           <>
                             <Upload size={24} className="text-gray-400 mb-1" />
-                            <p className="text-sm text-gray-500">Click to upload a shop photo</p>
-                            <p className="text-xs text-gray-400">JPEG, PNG, WebP — max 5MB</p>
+                            <p className="text-sm text-gray-500">{t("common.click_to_upload_shop_photo")}</p>
+                            <p className="text-xs text-gray-400">{t("common.image_format_hint")}</p>
                           </>
                         )}
                       </div>
                     )}
                     <input ref={sellerFileInputRef} type="file" accept="image/*" className="hidden"
                       onChange={(e) => handleImageUpload(e.target.files?.[0], "seller")} />
-                    <p className="text-xs text-gray-400 text-center">or paste an image URL:</p>
-                    <Input placeholder="https://..." value={registerData.image}
+                    <p className="text-xs text-gray-400 text-center">{t("common.or_paste_image_url")}</p>
+                    <Input placeholder={t("common.image_url_placeholder")} value={registerData.image}
                       onChange={(e) => setRegisterData({ ...registerData, image: e.target.value })} />
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">Register Shop</Button>
+                <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">{t("seller_registration.submit_btn")}</Button>
               </form>
             </DialogContent>
           </Dialog>
@@ -423,49 +429,49 @@ const DashboardPage = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-            Seller Dashboard
+            {t("dashboard.title")}
           </h1>
-          <p className="text-gray-500">Manage your spare parts inventory</p>
+          <p className="text-gray-500">{t("dashboard.subtitle")}</p>
         </div>
 
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={handleDownloadCatalog} data-testid="download-catalog-btn">
-            <Download size={18} className="mr-2" />Download Catalog
+            <Download size={18} className="mr-2" />{t("dashboard.download_catalog_btn")}
           </Button>
           {/* Edit Shop Dialog */}
           <Dialog open={editShopOpen} onOpenChange={setEditShopOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" data-testid="edit-shop-btn">
-                <Edit size={18} className="mr-2" />Edit Shop
+                <Edit size={18} className="mr-2" />{t("dashboard.edit_shop_btn")}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>Edit Shop Profile</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>{t("dashboard.edit_shop_dialog_title")}</DialogTitle></DialogHeader>
               <form onSubmit={handleEditShop} className="space-y-4">
-                <div><Label>Shop Name *</Label>
-                  <Input placeholder="Your shop name" value={editShopData.name}
+                <div><Label>{t("common.shop_name_label")}</Label>
+                  <Input placeholder={t("common.shop_name_placeholder")} value={editShopData.name}
                     onChange={(e) => setEditShopData({ ...editShopData, name: e.target.value })} />
                 </div>
-                <div><Label>Location</Label>
+                <div><Label>{t("common.location_label")}</Label>
                   <Input value={editShopData.location}
                     onChange={(e) => setEditShopData({ ...editShopData, location: e.target.value })} />
                 </div>
-                <div><Label>Description</Label>
+                <div><Label>{t("common.description_label")}</Label>
                   <Textarea rows={2} value={editShopData.description}
                     onChange={(e) => setEditShopData({ ...editShopData, description: e.target.value })} />
                 </div>
-                <div><Label>Phone Number *</Label>
-                  <Input placeholder="+237XXXXXXXXX" value={editShopData.phone}
+                <div><Label>{t("common.phone_number_label")}</Label>
+                  <Input placeholder={t("common.phone_placeholder")} value={editShopData.phone}
                     onChange={(e) => setEditShopData({ ...editShopData, phone: e.target.value })} />
                 </div>
-                <div><Label>WhatsApp Number *</Label>
-                  <Input placeholder="+237XXXXXXXXX" value={editShopData.whatsapp}
+                <div><Label>{t("common.whatsapp_number_label")}</Label>
+                  <Input placeholder={t("common.phone_placeholder")} value={editShopData.whatsapp}
                     onChange={(e) => setEditShopData({ ...editShopData, whatsapp: e.target.value })} />
                 </div>
 
                 {/* Shop logo upload */}
                 <div>
-                  <Label>Shop Logo / Photo</Label>
+                  <Label>{t("common.shop_logo_label")}</Label>
                   <div className="mt-1 space-y-2">
                     {editShopData.image ? (
                       <div className="relative w-full h-32 bg-gray-100 rounded-lg overflow-hidden">
@@ -485,21 +491,21 @@ const DashboardPage = () => {
                         ) : (
                           <>
                             <Upload size={24} className="text-gray-400 mb-1" />
-                            <p className="text-sm text-gray-500">Click to upload a shop photo</p>
-                            <p className="text-xs text-gray-400">JPEG, PNG, WebP — max 5MB</p>
+                            <p className="text-sm text-gray-500">{t("common.click_to_upload_shop_photo")}</p>
+                            <p className="text-xs text-gray-400">{t("common.image_format_hint")}</p>
                           </>
                         )}
                       </div>
                     )}
                     <input ref={editShopFileInputRef} type="file" accept="image/*" className="hidden"
                       onChange={(e) => handleImageUpload(e.target.files?.[0], "editShop")} />
-                    <p className="text-xs text-gray-400 text-center">or paste an image URL:</p>
-                    <Input placeholder="https://..." value={editShopData.image}
+                    <p className="text-xs text-gray-400 text-center">{t("common.or_paste_image_url")}</p>
+                    <Input placeholder={t("common.image_url_placeholder")} value={editShopData.image}
                       onChange={(e) => setEditShopData({ ...editShopData, image: e.target.value })} />
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">Save Changes</Button>
+                <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">{t("common.save_changes")}</Button>
               </form>
             </DialogContent>
           </Dialog>
@@ -511,31 +517,31 @@ const DashboardPage = () => {
         }}>
           <DialogTrigger asChild>
             <Button className="bg-[#1a5c38] hover:bg-[#144a2d]" data-testid="add-part-btn">
-              <Plus size={18} className="mr-2" />Add New Part
+              <Plus size={18} className="mr-2" />{t("dashboard.add_part_btn")}
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>{editingPart ? "Edit Part" : "Add New Part"}</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>{editingPart ? t("dashboard.edit_part_dialog_title") : t("dashboard.add_part_dialog_title")}</DialogTitle></DialogHeader>
             <form onSubmit={handleAddPart} className="space-y-4">
-              <div><Label>Part Name *</Label>
-                <Input placeholder="e.g., Brake Pads Set (Front)" value={partForm.name}
+              <div><Label>{t("dashboard.part_name_label")}</Label>
+                <Input placeholder={t("dashboard.part_name_placeholder")} value={partForm.name}
                   onChange={(e) => setPartForm({ ...partForm, name: e.target.value })} />
               </div>
-              <div><Label>Part Number *</Label>
-                <Input placeholder="e.g., BP-TY-001" value={partForm.part_number}
+              <div><Label>{t("dashboard.part_number_label")}</Label>
+                <Input placeholder={t("dashboard.part_number_placeholder")} value={partForm.part_number}
                   onChange={(e) => setPartForm({ ...partForm, part_number: e.target.value })} />
               </div>
               <div>
-                <Label>Category</Label>
+                <Label>{t("dashboard.category_label")}</Label>
                 <Select value={partForm.category} onValueChange={(v) => setPartForm({ ...partForm, category: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder={t("dashboard.category_placeholder")} /></SelectTrigger>
                   <SelectContent>
                     {categories.map((cat) => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>Compatible Brands</Label>
+                <Label>{t("dashboard.compatible_brands_label")}</Label>
                 <div className="flex flex-wrap gap-2 mt-1">
                   {brands.map((brand) => (
                     <Badge key={brand}
@@ -553,12 +559,12 @@ const DashboardPage = () => {
                 </div>
               </div>
               <div>
-                <Label>Compatible Models</Label>
+                <Label>{t("dashboard.compatible_models_label")}</Label>
                 <div className="flex flex-wrap gap-2 mt-1">
                   {partForm.brands.length === 0 ? (
-                    <p className="text-xs text-gray-400">Select a brand above first</p>
+                    <p className="text-xs text-gray-400">{t("dashboard.select_brand_first_hint")}</p>
                   ) : availableModels.length === 0 ? (
-                    <p className="text-xs text-gray-400">No models found for the selected brand(s)</p>
+                    <p className="text-xs text-gray-400">{t("dashboard.no_models_found_hint")}</p>
                   ) : (
                     availableModels.map((model) => (
                       <Badge key={model}
@@ -577,7 +583,7 @@ const DashboardPage = () => {
                 </div>
               </div>
               <div>
-                <Label>Compatible Years</Label>
+                <Label>{t("dashboard.compatible_years_label")}</Label>
                 <div className="flex flex-wrap gap-2 mt-1 max-h-28 overflow-y-auto">
                   {years.map((yr) => (
                     <Badge key={yr}
@@ -595,33 +601,33 @@ const DashboardPage = () => {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><Label>Price (FCFA) *</Label>
-                  <Input type="number" placeholder="15000" value={partForm.price}
+                <div><Label>{t("dashboard.price_label")}</Label>
+                  <Input type="number" placeholder={t("dashboard.price_placeholder")} value={partForm.price}
                     onChange={(e) => setPartForm({ ...partForm, price: e.target.value })} />
                 </div>
-                <div><Label>Stock *</Label>
-                  <Input type="number" placeholder="10" value={partForm.stock}
+                <div><Label>{t("dashboard.stock_label")}</Label>
+                  <Input type="number" placeholder={t("dashboard.stock_placeholder")} value={partForm.stock}
                     onChange={(e) => setPartForm({ ...partForm, stock: e.target.value })} />
                 </div>
               </div>
               <div>
-                <Label>Condition</Label>
+                <Label>{t("common.condition_label")}</Label>
                 <Select value={partForm.condition} onValueChange={(v) => setPartForm({ ...partForm, condition: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="new">New</SelectItem>
-                    <SelectItem value="used">Used</SelectItem>
+                    <SelectItem value="new">{t("common.condition_new")}</SelectItem>
+                    <SelectItem value="used">{t("common.condition_used")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>Description</Label>
-                <Textarea rows={2} placeholder="Part description..." value={partForm.description}
+              <div><Label>{t("common.description_label")}</Label>
+                <Textarea rows={2} placeholder={t("dashboard.part_description_placeholder")} value={partForm.description}
                   onChange={(e) => setPartForm({ ...partForm, description: e.target.value })} />
               </div>
 
               {/* Image upload */}
               <div>
-                <Label>Part Image</Label>
+                <Label>{t("dashboard.part_image_label")}</Label>
                 <div className="mt-1 space-y-2">
                   {partForm.image ? (
                     <div className="relative w-full h-32 bg-gray-100 rounded-lg overflow-hidden">
@@ -641,22 +647,22 @@ const DashboardPage = () => {
                       ) : (
                         <>
                           <Upload size={24} className="text-gray-400 mb-1" />
-                          <p className="text-sm text-gray-500">Click to upload image</p>
-                          <p className="text-xs text-gray-400">JPEG, PNG, WebP — max 5MB</p>
+                          <p className="text-sm text-gray-500">{t("dashboard.click_to_upload_image")}</p>
+                          <p className="text-xs text-gray-400">{t("common.image_format_hint")}</p>
                         </>
                       )}
                     </div>
                   )}
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
                     onChange={(e) => handleImageUpload(e.target.files?.[0])} />
-                  <p className="text-xs text-gray-400 text-center">or paste an image URL:</p>
-                  <Input placeholder="https://..." value={partForm.image}
+                  <p className="text-xs text-gray-400 text-center">{t("common.or_paste_image_url")}</p>
+                  <Input placeholder={t("common.image_url_placeholder")} value={partForm.image}
                     onChange={(e) => setPartForm({ ...partForm, image: e.target.value })} />
                 </div>
               </div>
 
               <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">
-                {editingPart ? "Update Part" : "Add Part"}
+                {editingPart ? t("dashboard.update_part_btn") : t("dashboard.add_part_submit_btn")}
               </Button>
             </form>
           </DialogContent>
@@ -668,7 +674,7 @@ const DashboardPage = () => {
       <Dialog open={respondOpen} onOpenChange={setRespondOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Respond to Request</DialogTitle>
+            <DialogTitle>{t("dashboard.respond_dialog_title")}</DialogTitle>
             {respondingTo && (
               <p className="text-sm text-gray-500">
                 {respondingTo.part_name} — {respondingTo.vehicle_brand} {respondingTo.vehicle_model} {respondingTo.vehicle_year}
@@ -676,38 +682,38 @@ const DashboardPage = () => {
             )}
           </DialogHeader>
           <form onSubmit={handleRespond} className="space-y-4">
-            <div><Label>Your Price (FCFA) *</Label>
-              <Input type="number" placeholder="e.g., 15000" value={responseForm.price}
+            <div><Label>{t("dashboard.your_price_label")}</Label>
+              <Input type="number" placeholder={t("dashboard.your_price_placeholder")} value={responseForm.price}
                 onChange={(e) => setResponseForm({ ...responseForm, price: e.target.value })} />
             </div>
             <div>
-              <Label>Condition</Label>
+              <Label>{t("common.condition_label")}</Label>
               <Select value={responseForm.condition} onValueChange={(v) => setResponseForm({ ...responseForm, condition: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="new">New</SelectItem>
-                  <SelectItem value="used">Used</SelectItem>
+                  <SelectItem value="new">{t("common.condition_new")}</SelectItem>
+                  <SelectItem value="used">{t("common.condition_used")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Available?</Label>
+              <Label>{t("dashboard.available_label")}</Label>
               <Select value={responseForm.available ? "yes" : "no"}
                 onValueChange={(v) => setResponseForm({ ...responseForm, available: v === "yes" })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="yes">Yes, I have it in stock</SelectItem>
-                  <SelectItem value="no">Not available right now</SelectItem>
+                  <SelectItem value="yes">{t("dashboard.available_yes")}</SelectItem>
+                  <SelectItem value="no">{t("dashboard.available_no")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Message to buyer *</Label>
-              <Textarea rows={3} placeholder="e.g., I have this part in stock. It comes with a 3-month warranty..."
+            <div><Label>{t("dashboard.message_to_buyer_label")}</Label>
+              <Textarea rows={3} placeholder={t("dashboard.message_to_buyer_placeholder")}
                 value={responseForm.message}
                 onChange={(e) => setResponseForm({ ...responseForm, message: e.target.value })} />
             </div>
             <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">
-              <Send size={16} className="mr-2" />Send Response
+              <Send size={16} className="mr-2" />{t("dashboard.send_response_btn")}
             </Button>
           </form>
         </DialogContent>
@@ -717,10 +723,10 @@ const DashboardPage = () => {
       <Tabs defaultValue="parts" className="space-y-6">
         <TabsList>
           <TabsTrigger value="parts" className="gap-2">
-            <Package size={16} />My Parts ({parts.length})
+            <Package size={16} />{t("dashboard.tab_my_parts", { count: parts.length })}
           </TabsTrigger>
           <TabsTrigger value="requests" className="gap-2">
-            <MessageSquare size={16} />Part Requests ({requests.length})
+            <MessageSquare size={16} />{t("dashboard.tab_part_requests", { count: requests.length })}
           </TabsTrigger>
         </TabsList>
 
@@ -729,9 +735,9 @@ const DashboardPage = () => {
           {parts.length === 0 ? (
             <div className="text-center py-12 bg-gray-50 rounded-xl">
               <Package size={48} className="mx-auto text-gray-300 mb-4" />
-              <p className="text-gray-500 mb-4">No parts added yet</p>
+              <p className="text-gray-500 mb-4">{t("dashboard.no_parts_yet")}</p>
               <Button onClick={() => setAddPartOpen(true)} className="bg-[#1a5c38] hover:bg-[#144a2d]">
-                <Plus size={18} className="mr-2" />Add Your First Part
+                <Plus size={18} className="mr-2" />{t("dashboard.add_first_part_btn")}
               </Button>
             </div>
           ) : (
@@ -765,15 +771,15 @@ const DashboardPage = () => {
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Part?</AlertDialogTitle>
+                              <AlertDialogTitle>{t("dashboard.delete_part_title")}</AlertDialogTitle>
                               <AlertDialogDescription>
-                                This will permanently delete "{part.name}" from your inventory.
+                                {t("dashboard.delete_part_description", { name: part.name })}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
                               <AlertDialogAction onClick={() => handleDeletePart(part.id)}
-                                className="bg-red-500 hover:bg-red-600">Delete</AlertDialogAction>
+                                className="bg-red-500 hover:bg-red-600">{t("dashboard.delete_btn")}</AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
@@ -782,9 +788,9 @@ const DashboardPage = () => {
                     <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
                       <span className="font-mono font-bold text-[#1a5c38]">{part.price?.toLocaleString()} FCFA</span>
                       <Badge variant="secondary" className={part.stock > 10 ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}>
-                        {part.stock} in stock
+                        {t("dashboard.stock_badge", { count: part.stock })}
                       </Badge>
-                      {part.condition === "used" && <Badge className="bg-yellow-500">Used</Badge>}
+                      {part.condition === "used" && <Badge className="bg-yellow-500">{t("common.condition_used")}</Badge>}
                     </div>
                   </div>
                 </div>
@@ -798,7 +804,7 @@ const DashboardPage = () => {
           {requests.length === 0 ? (
             <div className="text-center py-12 bg-gray-50 rounded-xl">
               <MessageSquare size={48} className="mx-auto text-gray-300 mb-4" />
-              <p className="text-gray-500">No open requests at the moment</p>
+              <p className="text-gray-500">{t("dashboard.no_open_requests")}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -812,12 +818,12 @@ const DashboardPage = () => {
                           <h3 className="font-semibold text-gray-900">{request.part_name}</h3>
                           {request.urgency === "urgent" && (
                             <Badge className="bg-red-100 text-red-700 text-xs">
-                              <AlertCircle size={10} className="mr-1" />Urgent
+                              <AlertCircle size={10} className="mr-1" />{t("dashboard.urgent_badge")}
                             </Badge>
                           )}
                           {alreadyResponded && (
                             <Badge className="bg-green-100 text-green-700 text-xs">
-                              <CheckCircle2 size={10} className="mr-1" />Responded
+                              <CheckCircle2 size={10} className="mr-1" />{t("dashboard.responded_badge")}
                             </Badge>
                           )}
                         </div>
@@ -838,7 +844,7 @@ const DashboardPage = () => {
                         className={alreadyResponded ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-[#1a5c38] hover:bg-[#144a2d] text-white"}
                       >
                         <Send size={14} className="mr-1" />
-                        {alreadyResponded ? "Respond Again" : "Respond"}
+                        {alreadyResponded ? t("dashboard.respond_again_btn") : t("dashboard.respond_btn")}
                       </Button>
                     </div>
                   </div>

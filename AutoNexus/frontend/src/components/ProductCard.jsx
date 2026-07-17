@@ -1,24 +1,26 @@
 import { Link } from "react-router-dom";
 import { MessageCircle, Phone, Star, CheckCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { logEvent } from "../lib/analytics";
 
 const ProductCard = ({ part }) => {
+  const { t } = useTranslation();
   const stockStatus = part.stock > 20 ? "in" : part.stock > 5 ? "low" : "out";
-  const stockLabel = part.stock > 20 ? "In Stock" : part.stock > 5 ? "Limited Stock" : "Low Stock";
-  
+  const stockLabel = part.stock > 20 ? t("common.stock_in") : part.stock > 5 ? t("common.stock_limited") : t("common.stock_low");
+
   // Generate WhatsApp message
   const whatsappMessage = encodeURIComponent(
-    `Hello, I found this spare part on AutoNexus.\n\n` +
-    `Product: ${part.name}\n` +
-    `Part Number: ${part.part_number}\n` +
-    `Vehicle: ${part.brands?.join(", ")} ${part.models?.join(", ")} ${part.years?.[0]}-${part.years?.[part.years.length - 1]}\n` +
-    `Price: ${part.price?.toLocaleString()} FCFA\n\n` +
-    `Is this part still available?`
+    t("whatsapp.part_inquiry_with_vehicle", {
+      name: part.name,
+      partNumber: part.part_number,
+      vehicle: `${part.brands?.join(", ")} ${part.models?.join(", ")} ${part.years?.[0]}-${part.years?.[part.years.length - 1]}`,
+      price: part.price?.toLocaleString(),
+    })
   );
 
-  const whatsappLink = part.seller?.whatsapp 
+  const whatsappLink = part.seller?.whatsapp
     ? `https://wa.me/${part.seller.whatsapp.replace('+', '')}?text=${whatsappMessage}`
     : '#';
 
@@ -37,7 +39,7 @@ const ProductCard = ({ part }) => {
             loading="lazy"
           />
           {part.condition === "used" && (
-            <Badge className="absolute top-2 left-2 bg-yellow-500">Used</Badge>
+            <Badge className="absolute top-2 left-2 bg-yellow-500">{t("common.condition_used")}</Badge>
           )}
         </div>
       </Link>
@@ -87,9 +89,9 @@ const ProductCard = ({ part }) => {
               </Link>
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <Star size={12} className="fill-yellow-400 text-yellow-400" />
-                <span>{part.seller.rating_count > 0 ? part.seller.rating?.toFixed(1) : "New"}</span>
+                <span>{part.seller.rating_count > 0 ? part.seller.rating?.toFixed(1) : t("common.new_seller_badge")}</span>
                 <span>•</span>
-                <span>{part.seller.sales_count} sales</span>
+                <span>{part.seller.sales_count} {t("common.sales_suffix")}</span>
               </div>
             </div>
             {part.seller.verified && (
@@ -115,7 +117,7 @@ const ProductCard = ({ part }) => {
 
         {/* Action Buttons */}
         <div className="flex gap-2">
-          <a 
+          <a
             href={whatsappLink}
             target="_blank"
             rel="noopener noreferrer"
@@ -123,12 +125,12 @@ const ProductCard = ({ part }) => {
             data-testid={`whatsapp-btn-${part.id}`}
             onClick={() => logEvent("whatsapp_click", { part_id: part.id, seller_id: part.seller?.id })}
           >
-            <Button 
+            <Button
               className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white"
               size="sm"
             >
               <MessageCircle size={16} className="mr-1" />
-              WhatsApp
+              {t("common.whatsapp_short")}
             </Button>
           </a>
           {part.seller?.phone && (

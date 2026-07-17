@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Phone, Mail, Lock, User, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useAuth } from "../context/AuthContext";
+import { getErrorMessage } from "../lib/errorMessage";
 
 const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
   const { signup, login } = useAuth();
 
   const [mode, setMode] = useState("login"); // "login" | "signup"
@@ -25,7 +28,7 @@ const LoginPage = () => {
     e.preventDefault();
 
     if (!password || password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+      toast.error(t("auth.toast_password_too_short"));
       return;
     }
 
@@ -33,12 +36,12 @@ const LoginPage = () => {
     try {
       if (mode === "signup") {
         if (contactType === "phone" && phone.length < 13) {
-          toast.error("Please enter a valid Cameroon phone number (+237XXXXXXXXX)");
+          toast.error(t("auth.toast_invalid_phone"));
           setLoading(false);
           return;
         }
         if (contactType === "email" && !email.includes("@")) {
-          toast.error("Please enter a valid email address");
+          toast.error(t("auth.toast_invalid_email"));
           setLoading(false);
           return;
         }
@@ -48,20 +51,20 @@ const LoginPage = () => {
           email: contactType === "email" ? email : undefined,
           password,
         });
-        toast.success("Account created! Welcome to AutoNexus.");
+        toast.success(t("auth.toast_account_created"));
       } else {
         if (!identifier) {
-          toast.error("Enter your phone number or email");
+          toast.error(t("auth.toast_enter_identifier"));
           setLoading(false);
           return;
         }
         await login(identifier, password);
-        toast.success("Login successful!");
+        toast.success(t("auth.toast_login_success"));
       }
       const from = location.state?.from?.pathname || "/";
       navigate(from, { replace: true });
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Something went wrong");
+      toast.error(getErrorMessage(error, "auth.toast_something_wrong"));
     } finally {
       setLoading(false);
     }
@@ -79,10 +82,10 @@ const LoginPage = () => {
               </svg>
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
-              Welcome to AutoNexus
+              {t("auth.welcome_title")}
             </h1>
             <p className="text-gray-500 mt-2">
-              {mode === "login" ? "Log in to your account" : "Create your account"}
+              {mode === "login" ? t("auth.subtitle_login") : t("auth.subtitle_signup")}
             </p>
           </div>
 
@@ -96,7 +99,7 @@ const LoginPage = () => {
               }`}
               data-testid="login-tab"
             >
-              Log In
+              {t("auth.tab_login")}
             </button>
             <button
               type="button"
@@ -106,7 +109,7 @@ const LoginPage = () => {
               }`}
               data-testid="signup-tab"
             >
-              Sign Up
+              {t("auth.tab_signup")}
             </button>
           </div>
 
@@ -114,13 +117,13 @@ const LoginPage = () => {
             {mode === "signup" && (
               <>
                 <div>
-                  <Label htmlFor="name">Name (optional)</Label>
+                  <Label htmlFor="name">{t("auth.name_label")}</Label>
                   <div className="relative mt-1">
                     <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <Input
                       id="name"
                       type="text"
-                      placeholder="Your name"
+                      placeholder={t("auth.name_placeholder")}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="pl-10 h-12"
@@ -137,7 +140,7 @@ const LoginPage = () => {
                       contactType === "phone" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                     }`}
                   >
-                    Use Phone
+                    {t("auth.use_phone")}
                   </button>
                   <button
                     type="button"
@@ -146,19 +149,19 @@ const LoginPage = () => {
                       contactType === "email" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                     }`}
                   >
-                    Use Email
+                    {t("auth.use_email")}
                   </button>
                 </div>
 
                 {contactType === "phone" ? (
                   <div>
-                    <Label htmlFor="phone">Phone Number</Label>
+                    <Label htmlFor="phone">{t("auth.phone_number_label")}</Label>
                     <div className="relative mt-1">
                       <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                       <Input
                         id="phone"
                         type="tel"
-                        placeholder="+237XXXXXXXXX"
+                        placeholder={t("common.phone_placeholder")}
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                         className="pl-10 h-12"
@@ -168,13 +171,13 @@ const LoginPage = () => {
                   </div>
                 ) : (
                   <div>
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email">{t("auth.email_label")}</Label>
                     <div className="relative mt-1">
                       <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                       <Input
                         id="email"
                         type="email"
-                        placeholder="you@example.com"
+                        placeholder={t("auth.email_placeholder")}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         className="pl-10 h-12"
@@ -188,7 +191,7 @@ const LoginPage = () => {
 
             {mode === "login" && (
               <div>
-                <Label htmlFor="identifier">Phone or Email</Label>
+                <Label htmlFor="identifier">{t("common.phone_or_email_label")}</Label>
                 <div className="relative mt-1">
                   <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <Input
@@ -198,7 +201,7 @@ const LoginPage = () => {
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck="false"
-                    placeholder="+237XXXXXXXXX or you@example.com"
+                    placeholder={t("common.phone_or_email_placeholder")}
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     className="pl-10 h-12"
@@ -209,14 +212,14 @@ const LoginPage = () => {
             )}
 
             <div>
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("auth.password_label")}</Label>
               <div className="relative mt-1">
                 <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <Input
                   id="password"
                   type="password"
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  placeholder="At least 6 characters"
+                  placeholder={t("auth.password_placeholder")}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 h-12"
@@ -229,7 +232,7 @@ const LoginPage = () => {
                   className="block text-right text-sm text-[#1a5c38] hover:underline mt-2"
                   data-testid="forgot-password-link"
                 >
-                  Forgot password?
+                  {t("auth.forgot_password")}
                 </Link>
               )}
             </div>
@@ -241,16 +244,16 @@ const LoginPage = () => {
               data-testid="submit-auth-btn"
             >
               {loading ? (
-                <><Loader2 size={20} className="mr-2 animate-spin" />Please wait...</>
+                <><Loader2 size={20} className="mr-2 animate-spin" />{t("auth.please_wait")}</>
               ) : (
-                <>{mode === "login" ? "Log In" : "Create Account"} <ArrowRight size={18} className="ml-2" /></>
+                <>{mode === "login" ? t("auth.submit_login") : t("auth.submit_signup")} <ArrowRight size={18} className="ml-2" /></>
               )}
             </Button>
           </form>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          By continuing, you agree to our Terms of Service
+          {t("auth.terms_notice")}
         </p>
       </div>
     </div>
