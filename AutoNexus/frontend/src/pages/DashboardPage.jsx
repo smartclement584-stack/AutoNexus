@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import {
   Plus, Package, MessageSquare, Edit, Trash2, Loader2, Store, X,
-  Upload, Image as ImageIcon, CheckCircle2, AlertCircle, Car, MapPin, Send, Download
+  Upload, Image as ImageIcon, CheckCircle2, AlertCircle, Car, MapPin, Send, Download,
+  TrendingUp
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -34,6 +35,7 @@ const DashboardPage = () => {
   const { t } = useTranslation();
   const [parts, setParts] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [demandStatsCount, setDemandStatsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [addPartOpen, setAddPartOpen] = useState(false);
   const [editingPart, setEditingPart] = useState(null);
@@ -81,13 +83,15 @@ const DashboardPage = () => {
         setYears(yearsRes.data.years.slice().reverse());
 
         if (isSeller) {
-          const [partsRes, requestsRes, profileRes] = await Promise.all([
+          const [partsRes, requestsRes, profileRes, demandStatsRes] = await Promise.all([
             axios.get(`${API}/seller/parts`, { headers: getAuthHeader() }),
             axios.get(`${API}/seller/requests`, { headers: getAuthHeader() }),
-            axios.get(`${API}/seller/profile`, { headers: getAuthHeader() })
+            axios.get(`${API}/seller/profile`, { headers: getAuthHeader() }),
+            axios.get(`${API}/seller/demand-stats`, { headers: getAuthHeader() })
           ]);
           setParts(partsRes.data.parts);
           setRequests(requestsRes.data.requests);
+          setDemandStatsCount(demandStatsRes.data.count);
           setEditShopData({
             name: profileRes.data.name || "",
             location: profileRes.data.location || "",
@@ -718,6 +722,14 @@ const DashboardPage = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Demand visibility banner */}
+      <div className="flex items-center gap-3 bg-[#1a5c38]/5 border border-[#1a5c38]/20 rounded-xl p-4 mb-6" data-testid="demand-stats-banner">
+        <TrendingUp size={20} className="text-[#1a5c38] flex-shrink-0" />
+        <p className="text-sm text-gray-800">
+          {t("dashboard.demand_stats", { count: demandStatsCount })}
+        </p>
+      </div>
 
       {/* Tabs */}
       <Tabs defaultValue="parts" className="space-y-6">

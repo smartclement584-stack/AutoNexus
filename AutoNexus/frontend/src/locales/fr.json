@@ -103,7 +103,10 @@
       "fair": "Moyen",
       "good": "Bon",
       "strong": "Fort"
-    }
+    },
+    "buyer_type_label": "Je suis...",
+    "buyer_type_individual": "Particulier",
+    "buyer_type_mechanic": "Mécanicien / Garage"
   },
   "seller_registration": {
     "pending_title": "Demande en cours d'examen",
@@ -177,7 +180,9 @@
     "toast_shop_updated": "Profil de la boutique mis à jour !",
     "toast_part_deleted": "Pièce supprimée !",
     "toast_image_uploaded": "Image envoyée !",
-    "toast_catalog_download_failed": "Échec du téléchargement du catalogue"
+    "toast_catalog_download_failed": "Échec du téléchargement du catalogue",
+    "demand_stats_one": "{{count}} demande active correspond à votre inventaire cette semaine.",
+    "demand_stats_other": "{{count}} demandes actives correspondent à votre inventaire cette semaine."
   },
   "errors": {
     "AUTH_REQUIRED": "Vous devez être connecté(e) pour faire cela.",
@@ -220,7 +225,8 @@
     "failed_to_update_shop": "Échec de la mise à jour du profil de la boutique",
     "failed_to_save_part": "Échec de l'enregistrement de la pièce",
     "failed_to_delete_part": "Échec de la suppression de la pièce",
-    "failed_to_send_response": "Échec de l'envoi de la réponse"
+    "failed_to_send_response": "Échec de l'envoi de la réponse",
+    "INVALID_BUYER_TYPE": "Type de compte acheteur invalide"
   },
   "whatsapp": {
     "part_inquiry_no_vehicle": "Bonjour, j'ai trouvé cette pièce détachée sur AutoNexus.\n\nProduit : {{name}}\nRéférence : {{partNumber}}\nPrix : {{price}} FCFA\n\nCette pièce est-elle toujours disponible ?",

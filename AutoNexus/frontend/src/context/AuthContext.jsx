@@ -72,8 +72,8 @@ export const AuthProvider = ({ children }) => {
     return () => axios.interceptors.response.eject(interceptorId);
   }, []);
 
-  const signup = async ({ name, phone, email, password }) => {
-    const response = await axios.post(`${API}/auth/signup`, { name, phone, email, password });
+  const signup = async ({ name, phone, email, password, buyerType }) => {
+    const response = await axios.post(`${API}/auth/signup`, { name, phone, email, password, buyer_type: buyerType });
     const { token: newToken, user: userData } = response.data;
     localStorage.setItem("autonexus_token", newToken);
     setToken(newToken);

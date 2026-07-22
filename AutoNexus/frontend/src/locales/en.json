@@ -103,7 +103,10 @@
       "fair": "Fair",
       "good": "Good",
       "strong": "Strong"
-    }
+    },
+    "buyer_type_label": "I am a...",
+    "buyer_type_individual": "Car Owner",
+    "buyer_type_mechanic": "Mechanic / Garage"
   },
   "seller_registration": {
     "pending_title": "Application Under Review",
@@ -177,7 +180,9 @@
     "toast_shop_updated": "Shop profile updated!",
     "toast_part_deleted": "Part deleted!",
     "toast_image_uploaded": "Image uploaded!",
-    "toast_catalog_download_failed": "Failed to download catalog"
+    "toast_catalog_download_failed": "Failed to download catalog",
+    "demand_stats_one": "{{count}} active request matches your inventory this week.",
+    "demand_stats_other": "{{count}} active requests match your inventory this week."
   },
   "errors": {
     "AUTH_REQUIRED": "You need to be logged in to do that.",
@@ -220,7 +225,8 @@
     "failed_to_update_shop": "Failed to update shop profile",
     "failed_to_save_part": "Failed to save part",
     "failed_to_delete_part": "Failed to delete part",
-    "failed_to_send_response": "Failed to send response"
+    "failed_to_send_response": "Failed to send response",
+    "INVALID_BUYER_TYPE": "Invalid buyer type"
   },
   "whatsapp": {
     "part_inquiry_no_vehicle": "Hello, I found this spare part on AutoNexus.\n\nProduct: {{name}}\nPart Number: {{partNumber}}\nPrice: {{price}} FCFA\n\nIs this part still available?",

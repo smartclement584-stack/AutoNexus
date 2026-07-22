@@ -129,6 +129,11 @@ class UserBase(BaseModel):
     email: Optional[str] = None
     name: Optional[str] = None
     role: str = "buyer"
+    # "individual" | "mechanic" -- only meaningful while role == "buyer".
+    # None for sellers/admins, and for any pre-existing user created before
+    # this field existed (read sites already use .get() and treat missing
+    # the same as "individual" -- no migration needed).
+    buyer_type: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class User(UserBase):
@@ -156,6 +161,11 @@ class SignupRequest(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     password: str
+    # Defaults to "individual" so existing clients that don't send this at
+    # all keep working unchanged. Validated against the allowed set in the
+    # /auth/signup handler itself (matching this file's existing convention
+    # of validating in the handler body, not via a pydantic field_validator).
+    buyer_type: Optional[str] = "individual"
 
 class LoginRequest(BaseModel):
     identifier: str  # phone or email
@@ -492,7 +502,8 @@ def public_user(user: dict) -> dict:
         "name": user.get("name"),
         "role": user["role"],
         "seller_id": user.get("seller_id"),
-        "is_admin": user.get("is_admin", False)
+        "is_admin": user.get("is_admin", False),
+        "buyer_type": user.get("buyer_type")
     }
 
 def build_catalog_pdf(seller: dict, parts: list) -> bytes:
@@ -602,6 +613,10 @@ async def signup(request: Request, data: SignupRequest):
     if len(data.password) < 6:
         raise AppException(status_code=400, detail="Password must be at least 6 characters", error_code="PASSWORD_TOO_SHORT")
 
+    buyer_type = data.buyer_type or "individual"
+    if buyer_type not in ("individual", "mechanic"):
+        raise AppException(status_code=400, detail="Invalid buyer type", error_code="INVALID_BUYER_TYPE")
+
     existing_query = {"$or": []}
     if phone:
         existing_query["$or"].append({"phone": phone})
@@ -615,7 +630,8 @@ async def signup(request: Request, data: SignupRequest):
         phone=phone,
         email=email,
         name=data.name,
-        password_hash=hash_password(data.password)
+        password_hash=hash_password(data.password),
+        buyer_type=buyer_type
     )
     user_dict = new_user.model_dump()
     user_dict['created_at'] = user_dict['created_at'].isoformat()
@@ -1419,6 +1435,28 @@ async def get_seller_requests(user: dict = Depends(get_current_user)):
         raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
     requests = await db.requests.find({"status": "open"}, {"_id": 0}).sort([("created_at", -1)]).to_list(100)
     return {"requests": requests}
+
+@api_router.get("/seller/demand-stats")
+async def get_seller_demand_stats(user: dict = Depends(get_current_user)):
+    """Count of currently open requests relevant to this seller, for the
+    dashboard's demand-visibility banner. The Seller model has no
+    brands/categories field of its own, so relevance is derived from the
+    seller's own current listings (SparePart.brands) matched against
+    PartRequest.vehicle_brand -- the same two fields already used
+    everywhere else in the app to connect parts to vehicles, not a new
+    matching scheme. Returns only a count, scoped to the caller's own
+    seller_id from the authenticated session -- never the underlying
+    request documents, and never queryable for another seller's id."""
+    if user["role"] != "seller":
+        raise AppException(status_code=403, detail="Not a seller", error_code="NOT_A_SELLER")
+    seller_brands = await db.parts.distinct("brands", {"seller_id": user["seller_id"]})
+    if not seller_brands:
+        return {"count": 0}
+    count = await db.requests.count_documents({
+        "status": "open",
+        "vehicle_brand": {"$in": seller_brands}
+    })
+    return {"count": count}
 
 @api_router.get("/seller/catalog/pdf")
 async def download_own_catalog(user: dict = Depends(get_current_user)):

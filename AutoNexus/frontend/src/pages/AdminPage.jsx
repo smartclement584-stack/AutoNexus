@@ -34,6 +34,7 @@ const AdminPage = () => {
   const [search, setSearch] = useState("");
   const [imageUploading, setImageUploading] = useState(false);
   const fileInputRef = useRef(null);
+  const managePartFileInputRef = useRef(null);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState(null);
@@ -145,7 +146,7 @@ const AdminPage = () => {
     setEditOpen(true);
   };
 
-  const handleImageUpload = async (file) => {
+  const handleImageUpload = async (file, target = "seller") => {
     if (!file) return;
     const formData = new FormData();
     formData.append("file", file);
@@ -155,10 +156,14 @@ const AdminPage = () => {
         headers: { ...getAuthHeader(), "Content-Type": "multipart/form-data" }
       });
       const imageUrl = `${process.env.REACT_APP_BACKEND_URL}${res.data.url}`;
-      setEditForm(f => ({ ...f, image: imageUrl }));
+      if (target === "part") {
+        setManagePartForm(f => ({ ...f, image: imageUrl }));
+      } else {
+        setEditForm(f => ({ ...f, image: imageUrl }));
+      }
       toast.success("Image uploaded!");
     } catch (e) {
-      toast.error("Image upload failed");
+      toast.error(e.response?.data?.detail || "Image upload failed");
     } finally {
       setImageUploading(false);
     }
@@ -751,9 +756,40 @@ const AdminPage = () => {
                   onChange={(e) => setManagePartForm({ ...managePartForm, condition: e.target.value })} />
               </div>
             </div>
-            <div><Label>Image URL</Label>
-              <Input placeholder="https://..." value={managePartForm.image}
-                onChange={(e) => setManagePartForm({ ...managePartForm, image: e.target.value })} />
+            {/* Image upload */}
+            <div>
+              <Label>Product Image</Label>
+              <div className="mt-1 space-y-2">
+                {managePartForm.image ? (
+                  <div className="relative w-full h-32 bg-gray-100 rounded-lg overflow-hidden">
+                    <img src={managePartForm.image} alt="Product" className="w-full h-full object-cover" />
+                    <button type="button" onClick={() => setManagePartForm(f => ({ ...f, image: "" }))}
+                      className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full">
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    className="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-[#1a5c38] transition-colors"
+                    onClick={() => managePartFileInputRef.current?.click()}
+                  >
+                    {imageUploading ? (
+                      <Loader2 size={24} className="animate-spin text-[#1a5c38]" />
+                    ) : (
+                      <>
+                        <Upload size={24} className="text-gray-400 mb-1" />
+                        <p className="text-sm text-gray-500">Click to upload a product photo</p>
+                        <p className="text-xs text-gray-400">JPEG, PNG, WebP — max 5MB</p>
+                      </>
+                    )}
+                  </div>
+                )}
+                <input ref={managePartFileInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => handleImageUpload(e.target.files?.[0], "part")} />
+                <p className="text-xs text-gray-400 text-center">or paste an image URL:</p>
+                <Input placeholder="https://..." value={managePartForm.image}
+                  onChange={(e) => setManagePartForm({ ...managePartForm, image: e.target.value })} />
+              </div>
             </div>
             <Button type="submit" className="w-full bg-[#1a5c38] hover:bg-[#144a2d]">
               <Plus size={16} className="mr-2" />Add Product

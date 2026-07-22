@@ -17,6 +17,7 @@ const LoginPage = () => {
 
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [contactType, setContactType] = useState("phone"); // "phone" | "email" — signup only
+  const [buyerType, setBuyerType] = useState("individual"); // "individual" | "mechanic" — signup only
   const [name, setName] = useState("");
   const [identifier, setIdentifier] = useState(""); // login: phone or email
   const [phone, setPhone] = useState("+237");
@@ -50,6 +51,7 @@ const LoginPage = () => {
           phone: contactType === "phone" ? phone : undefined,
           email: contactType === "email" ? email : undefined,
           password,
+          buyerType,
         });
         toast.success(t("auth.toast_account_created"));
       } else {
@@ -128,6 +130,33 @@ const LoginPage = () => {
                       onChange={(e) => setName(e.target.value)}
                       className="pl-10 h-12"
                     />
+                  </div>
+                </div>
+
+                {/* Buyer type choice */}
+                <div>
+                  <Label>{t("auth.buyer_type_label")}</Label>
+                  <div className="flex bg-gray-100 rounded-lg p-1 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setBuyerType("individual")}
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        buyerType === "individual" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                      }`}
+                      data-testid="buyer-type-individual"
+                    >
+                      {t("auth.buyer_type_individual")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBuyerType("mechanic")}
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        buyerType === "mechanic" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                      }`}
+                      data-testid="buyer-type-mechanic"
+                    >
+                      {t("auth.buyer_type_mechanic")}
+                    </button>
                   </div>
                 </div>
 
